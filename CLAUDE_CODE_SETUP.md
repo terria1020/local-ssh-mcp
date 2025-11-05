@@ -72,7 +72,28 @@ pm2 delete ssh-mcp   # 제거
 
 ---
 
-## 2. Shell 환경변수 설정
+## 2. Shell 환경변수 설정 (v2.0.0 - JWT 인증)
+
+### JWT 토큰 발급받기
+
+먼저 서버로부터 JWT 토큰을 발급받아야 합니다:
+
+```bash
+# .env 파일에 설정된 TOKEN_PASSPHRASE 사용
+curl -X POST http://127.0.0.1:4000/auth \
+  -H "Content-Type: application/json" \
+  -d '{"token_passphrase": "your-passphrase-from-env"}'
+```
+
+응답 예시:
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": "30m",
+  "message": "JWT token issued successfully"
+}
+```
 
 ### zsh 사용자 (macOS 기본)
 
@@ -85,13 +106,18 @@ nano ~/.zshrc
 파일 끝에 추가:
 
 ```bash
-# SSH MCP Server Configuration
-export MCP_API_TOKEN="my-local-token"
+# SSH MCP Server Configuration (v2.0.0 - JWT)
+export MCP_JWT_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # 발급받은 JWT 토큰
 export MCP_SERVER_URL="http://127.0.0.1:4000"
 
 # 헬퍼 스크립트를 PATH에 추가 (어디서든 실행 가능)
 export PATH="$PATH:/Users/jaehan1346/Github/local-ssh-mcp/scripts"
 ```
+
+**중요:**
+- `MCP_JWT_TOKEN`에는 위에서 발급받은 JWT 토큰을 입력하세요
+- JWT 토큰은 30분 후 만료되므로 만료 시 재발급 필요
+- **절대 TOKEN_PASSPHRASE를 zshrc에 저장하지 마세요** (보안 위험)
 
 적용:
 ```bash
@@ -115,9 +141,24 @@ source ~/.bashrc
 ### 환경변수 확인
 
 ```bash
-echo $MCP_API_TOKEN
+echo $MCP_JWT_TOKEN
 echo $MCP_SERVER_URL
 which ssh-mcp-run.sh
+```
+
+### JWT 토큰 재발급 (만료 시)
+
+JWT 토큰은 30분 후 만료됩니다. 만료 시 다음과 같이 재발급:
+
+```bash
+# 1. 새 토큰 발급
+curl -X POST http://127.0.0.1:4000/auth \
+  -H "Content-Type: application/json" \
+  -d '{"token_passphrase": "your-passphrase-from-env"}'
+
+# 2. ~/.zshrc 파일에서 MCP_JWT_TOKEN 값 업데이트
+# 3. 적용
+source ~/.zshrc
 ```
 
 ---
@@ -125,11 +166,15 @@ which ssh-mcp-run.sh
 ## 3. 서버 동작 확인
 
 ```bash
-# Health check
+# Health check (인증 불필요)
 curl http://127.0.0.1:4000/mcp/health
 
+# Status check (JWT 인증 필요)
+curl -H "Authorization: Bearer $MCP_JWT_TOKEN" \
+     http://127.0.0.1:4000/mcp/status
+
 # 헬퍼 스크립트 테스트 (실제 서버 필요)
-ssh-mcp-run.sh your-server.com your-username "uptime"
+./scripts/ssh-mcp-run.sh your-server.com your-username "uptime"
 ```
 
 ---
@@ -148,7 +193,7 @@ Claude Code를 실행하고 자연스럽게 요청하세요:
 
 Claude가 자동으로 다음을 실행합니다:
 ```bash
-ssh-mcp-run.sh production.example.com ubuntu "kubectl get pods"
+./scripts/ssh-mcp-run.sh production.example.com ubuntu "kubectl get pods"
 ```
 
 **예시 2: 비밀번호 인증**
@@ -159,7 +204,7 @@ ssh-mcp-run.sh production.example.com ubuntu "kubectl get pods"
 
 Claude가 실행:
 ```bash
-ssh-mcp-run.sh -p password123 legacy-server.com admin "df -h"
+./scripts/ssh-mcp-run.sh -p password123 legacy-server.com admin "df -h"
 ```
 
 **예시 3: 여러 서버 확인**
@@ -243,10 +288,26 @@ Claude가 결과를 분석하고 해석해줍니다.
 curl http://127.0.0.1:4000/mcp/health
 ```
 
+### JWT 토큰이 만료된 경우
+
+에러 메시지: `"JWT token expired. Please obtain a new token..."`
+
+해결 방법:
+```bash
+# 1. 새 토큰 발급
+curl -X POST http://127.0.0.1:4000/auth \
+  -H "Content-Type: application/json" \
+  -d '{"token_passphrase": "your-passphrase"}'
+
+# 2. ~/.zshrc에서 MCP_JWT_TOKEN 업데이트
+# 3. 적용
+source ~/.zshrc
+```
+
 ### 환경변수가 설정되었는지 확인
 
 ```bash
-echo $MCP_API_TOKEN
+echo $MCP_JWT_TOKEN
 echo $MCP_SERVER_URL
 ```
 
@@ -267,14 +328,18 @@ Claude Code를 재시작하세요. 환경변수는 Claude Code 시작 시 로드
 
 ### 인증 에러 (401)
 
-API 토큰이 서버의 `.env` 파일과 일치하는지 확인:
+**JWT 토큰 관련 에러:**
+- "JWT token expired" → 토큰 재발급 필요
+- "JWT issuer mismatch" → 서버 설정 확인
+- "Invalid JWT token" → 토큰이 변조되었거나 잘못됨
 
+**해결 방법:**
 ```bash
-# Shell 환경변수
-echo $MCP_API_TOKEN
+# Shell 환경변수 확인
+echo $MCP_JWT_TOKEN
 
-# 서버 설정 파일
-cat /Users/jaehan1346/Github/local-ssh-mcp/.env | grep MCP_API_TOKEN
+# 서버 설정 확인
+cat /Users/jaehan1346/Github/local-ssh-mcp/.env | grep JWT
 ```
 
 ### SSH 연결 실패
@@ -284,21 +349,26 @@ cat /Users/jaehan1346/Github/local-ssh-mcp/.env | grep MCP_API_TOKEN
 
 ---
 
-## 7. 보안 모범 사례
+## 7. 보안 모범 사례 (v2.0.0)
 
-1. **API 토큰 보호**
-   - 강력한 토큰 사용: `openssl rand -hex 32`
-   - 토큰을 코드에 하드코딩하지 않기
+1. **TOKEN_PASSPHRASE 보호**
+   - 강력한 passphrase 사용: `openssl rand -hex 32`
+   - **절대 zshrc에 저장하지 않기** (오직 .env에만)
+   - JWT 토큰만 zshrc에 저장 (30분 후 만료)
 
-2. **SSH 키 사용 권장**
+2. **JWT 토큰 관리**
+   - 만료된 토큰은 즉시 재발급
+   - 토큰이 노출된 경우 TOKEN_PASSPHRASE 변경
+
+3. **SSH 키 사용 권장**
    - 비밀번호보다 키 기반 인증 사용
    - 키 파일에 passphrase 설정
 
-3. **로컬 전용**
+4. **로컬 전용**
    - 서버는 127.0.0.1에서만 리스닝
    - 외부 네트워크 노출 금지
 
-4. **로그 모니터링**
+5. **로그 모니터링**
    - 정기적으로 로그 확인: `tail -f logs/combined.log`
    - 의심스러운 활동 감지
 
@@ -336,8 +406,12 @@ macOS에서 로그인 시 자동 시작:
     <dict>
         <key>SSH_KEY_PATH</key>
         <string>/Users/jaehan1346/.ssh/id_rsa</string>
-        <key>MCP_API_TOKEN</key>
-        <string>my-local-token</string>
+        <key>TOKEN_PASSPHRASE</key>
+        <string>your-token-passphrase</string>
+        <key>JWT_SECRET_KEY</key>
+        <string>your-jwt-secret</string>
+        <key>JWT_ISSUER</key>
+        <string>local-ssh-mcp</string>
     </dict>
 </dict>
 </plist>
@@ -354,8 +428,10 @@ launchctl start com.local.ssh-mcp
 ## 요약
 
 1. ✅ 서버 실행 (백그라운드 또는 터미널)
-2. ✅ Shell 환경변수 설정 (`~/.zshrc` 또는 `~/.bashrc`)
-3. ✅ Claude Code에서 자연스럽게 요청
-4. ✅ **MCP 설정 파일에는 등록하지 않음**
+2. ✅ JWT 토큰 발급받기 (POST /auth)
+3. ✅ Shell 환경변수 설정 (`~/.zshrc`에 JWT 토큰 저장)
+4. ✅ Claude Code에서 자연스럽게 요청
+5. ✅ **MCP 설정 파일에는 등록하지 않음**
+6. ✅ JWT 토큰 만료 시 재발급 (30분마다)
 
 이제 Claude Code와 SSH MCP 서버를 함께 사용할 준비가 완료되었습니다! 🚀
