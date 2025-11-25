@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { AuthRequest, AuthResponse, MCPResponse } from '../types';
 import { generateToken, getTokenExpiration } from '../utils/jwt';
+import { authenticateToken } from '../middleware/auth';
+import { getCredentialStore } from '../services/credential-store';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -95,5 +97,166 @@ router.post('/', (req: Request, res: Response) => {
     res.status(500).json(response);
   }
 });
+
+/**
+ * POST /auth/add-server
+ * 서버 인증 정보 추가 (JWT 인증 필요)
+ */
+router.post('/add-server',
+  authenticateToken,
+  (req: Request, res: Response) => {
+    const { host, username, port, password, privateKeyPath, passphrase } = req.body;
+
+    // 필수 파라미터 검증
+    if (!host || !username) {
+      const response: MCPResponse = {
+        success: false,
+        error: 'Missing required parameters: host and username are required',
+        timestamp: new Date().toISOString()
+      };
+      res.status(400).json(response);
+      return;
+    }
+
+    // 인증 방법 검증 (password 또는 privateKeyPath 중 하나는 필수)
+    if (!password && !privateKeyPath) {
+      const response: MCPResponse = {
+        success: false,
+        error: 'Either password or privateKeyPath must be provided',
+        timestamp: new Date().toISOString()
+      };
+      res.status(400).json(response);
+      return;
+    }
+
+    try {
+      const credentialStore = getCredentialStore();
+
+      // 인증 정보 추가
+      credentialStore.addCredential({
+        host,
+        username,
+        port: port || 22,
+        password,
+        privateKeyPath,
+        passphrase
+      });
+
+      const authMethod = password
+        ? 'password'
+        : (passphrase ? 'SSH key with passphrase' : 'SSH key');
+
+      const response: MCPResponse = {
+        success: true,
+        result: {
+          message: `Credentials added successfully for ${username}@${host}`,
+          host,
+          username,
+          port: port || 22,
+          authMethod,
+          cachedUntil: 'Server restart or JWT expiration'
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      logger.info(`Credentials added for ${username}@${host} (auth: ${authMethod})`);
+      res.status(200).json(response);
+    } catch (error) {
+      const response: MCPResponse = {
+        success: false,
+        error: `Failed to add credentials: ${error}`,
+        timestamp: new Date().toISOString()
+      };
+      logger.error(`Failed to add credentials: ${error}`);
+      res.status(500).json(response);
+    }
+  }
+);
+
+/**
+ * GET /auth/list-servers
+ * 저장된 서버 인증 정보 목록 조회 (JWT 인증 필요)
+ */
+router.get('/list-servers',
+  authenticateToken,
+  (_req: Request, res: Response) => {
+    try {
+      const credentialStore = getCredentialStore();
+      const credentials = credentialStore.listCredentials();
+
+      const response: MCPResponse = {
+        success: true,
+        result: {
+          count: credentials.length,
+          servers: credentials
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      logger.info(`Listed ${credentials.length} cached credentials`);
+      res.status(200).json(response);
+    } catch (error) {
+      const response: MCPResponse = {
+        success: false,
+        error: `Failed to list credentials: ${error}`,
+        timestamp: new Date().toISOString()
+      };
+      logger.error(`Failed to list credentials: ${error}`);
+      res.status(500).json(response);
+    }
+  }
+);
+
+/**
+ * DELETE /auth/remove-server
+ * 서버 인증 정보 삭제 (JWT 인증 필요)
+ */
+router.delete('/remove-server',
+  authenticateToken,
+  (req: Request, res: Response) => {
+    const { host, username } = req.body;
+
+    if (!host || !username) {
+      const response: MCPResponse = {
+        success: false,
+        error: 'Missing required parameters: host and username are required',
+        timestamp: new Date().toISOString()
+      };
+      res.status(400).json(response);
+      return;
+    }
+
+    try {
+      const credentialStore = getCredentialStore();
+      const removed = credentialStore.removeCredential(host, username);
+
+      if (removed) {
+        const response: MCPResponse = {
+          success: true,
+          result: {
+            message: `Credentials removed for ${username}@${host}`
+          },
+          timestamp: new Date().toISOString()
+        };
+        res.status(200).json(response);
+      } else {
+        const response: MCPResponse = {
+          success: false,
+          error: `No credentials found for ${username}@${host}`,
+          timestamp: new Date().toISOString()
+        };
+        res.status(404).json(response);
+      }
+    } catch (error) {
+      const response: MCPResponse = {
+        success: false,
+        error: `Failed to remove credentials: ${error}`,
+        timestamp: new Date().toISOString()
+      };
+      logger.error(`Failed to remove credentials: ${error}`);
+      res.status(500).json(response);
+    }
+  }
+);
 
 export default router;

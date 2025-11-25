@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mcpRoutes from './routes/mcp';
+import mcpJsonRpcRoutes from './routes/mcp-jsonrpc';
 import authRoutes from './routes/auth';
 import logger from './utils/logger';
 import { MCPResponse } from './types';
@@ -67,23 +68,38 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // 라우트 등록
-app.use('/auth', authRoutes);  // JWT 토큰 발급 엔드포인트
-app.use('/mcp', mcpRoutes);    // MCP API 엔드포인트
+app.use('/auth', authRoutes);           // JWT 토큰 발급 및 인증 정보 관리 엔드포인트
+app.use('/mcp', mcpRoutes);             // MCP REST API 엔드포인트 (기존)
+app.use('/mcp', mcpJsonRpcRoutes);      // MCP JSON-RPC 2.0 엔드포인트 (신규)
 
 // 루트 경로
 app.get('/', (_req: Request, res: Response) => {
   res.json({
     service: 'Local SSH MCP Server',
-    version: '2.0.0',
+    version: '3.0.0',
     status: 'running',
     authentication: 'JWT-based (30 minute expiry)',
+    features: [
+      'MCP JSON-RPC 2.0 Protocol Support',
+      'Multi-server credential management',
+      'Server-specific command rules',
+      'Password/passphrase caching'
+    ],
     endpoints: {
-      auth: 'POST /auth (issue JWT token with token_passphrase)',
-      health: 'GET /mcp/health',
-      status: 'GET /mcp/status (requires JWT auth)',
-      run: 'POST /mcp/run (requires JWT auth)'
+      auth: {
+        issueToken: 'POST /auth (issue JWT token)',
+        addServer: 'POST /auth/add-server (add server credentials)',
+        listServers: 'GET /auth/list-servers (list cached servers)',
+        removeServer: 'DELETE /auth/remove-server (remove server credentials)'
+      },
+      mcp: {
+        health: 'GET /mcp/health',
+        status: 'GET /mcp/status (requires JWT auth)',
+        run: 'POST /mcp/run (requires JWT auth, legacy REST API)',
+        jsonrpc: 'POST /mcp/jsonrpc (MCP JSON-RPC 2.0, requires JWT auth)'
+      }
     },
-    documentation: 'See README.md for usage instructions'
+    documentation: 'See README.md and CLAUDE.md for usage instructions'
   });
 });
 
@@ -122,7 +138,7 @@ async function startServer(): Promise<void> {
     // 서버 리스닝 시작
     app.listen(Number(PORT), HOST, () => {
       logger.info('='.repeat(60));
-      logger.info('🚀 Local SSH MCP Server Started (v2.0.0)');
+      logger.info('🚀 Local SSH MCP Server Started (v3.0.0)');
       logger.info('='.repeat(60));
       logger.info(`📍 Server listening on: http://${HOST}:${PORT}`);
       logger.info(`🔐 SSH Key Path: ${process.env.SSH_KEY_PATH || 'Not configured'}`);
@@ -131,11 +147,20 @@ async function startServer(): Promise<void> {
       logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       logger.info(`📝 Log Level: ${process.env.LOG_LEVEL || 'info'}`);
       logger.info('='.repeat(60));
+      logger.info('✨ New Features (v3.0.0):');
+      logger.info('  • MCP JSON-RPC 2.0 Protocol Support');
+      logger.info('  • Multi-server credential management');
+      logger.info('  • Server-specific command rules');
+      logger.info('  • Password/passphrase caching');
+      logger.info('='.repeat(60));
       logger.info('Available endpoints:');
       logger.info(`  POST http://${HOST}:${PORT}/auth (obtain JWT token)`);
+      logger.info(`  POST http://${HOST}:${PORT}/auth/add-server (add credentials)`);
+      logger.info(`  GET  http://${HOST}:${PORT}/auth/list-servers (list servers)`);
       logger.info(`  GET  http://${HOST}:${PORT}/mcp/health`);
       logger.info(`  GET  http://${HOST}:${PORT}/mcp/status (requires JWT auth)`);
-      logger.info(`  POST http://${HOST}:${PORT}/mcp/run (requires JWT auth)`);
+      logger.info(`  POST http://${HOST}:${PORT}/mcp/run (REST API, requires JWT auth)`);
+      logger.info(`  POST http://${HOST}:${PORT}/mcp/jsonrpc (MCP JSON-RPC 2.0, requires JWT auth)`);
       logger.info('='.repeat(60));
     });
   } catch (error) {

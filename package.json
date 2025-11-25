@@ -1,7 +1,7 @@
 {
   "name": "local-ssh-mcp",
-  "version": "1.0.0",
-  "description": "Local SSH MCP Server for Claude Code - Secure backend proxy for server control",
+  "version": "3.0.0",
+  "description": "Local SSH MCP Server with JSON-RPC 2.0 Protocol, Multi-server Credential Management, and Server-specific Rules",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

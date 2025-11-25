@@ -63,3 +63,83 @@ export interface AuthResponse {
   expiresIn: string;
   expiresAt: string;
 }
+
+// ====================================
+// MCP JSON-RPC 2.0 타입 정의
+// ====================================
+
+/**
+ * JSON-RPC 2.0 기본 요청
+ */
+export interface JSONRPCRequest {
+  jsonrpc: '2.0';
+  id?: string | number | null;
+  method: string;
+  params?: any;
+}
+
+/**
+ * JSON-RPC 2.0 성공 응답
+ */
+export interface JSONRPCSuccessResponse {
+  jsonrpc: '2.0';
+  id: string | number | null;
+  result: any;
+}
+
+/**
+ * JSON-RPC 2.0 에러 응답
+ */
+export interface JSONRPCErrorResponse {
+  jsonrpc: '2.0';
+  id: string | number | null;
+  error: {
+    code: number;
+    message: string;
+    data?: any;
+  };
+}
+
+/**
+ * JSON-RPC 2.0 응답 (성공 또는 에러)
+ */
+export type JSONRPCResponse = JSONRPCSuccessResponse | JSONRPCErrorResponse;
+
+/**
+ * MCP Tool 정의
+ */
+export interface MCPTool {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, any>;
+    required?: string[];
+  };
+}
+
+/**
+ * MCP tools/list 응답
+ */
+export interface MCPToolsListResult {
+  tools: MCPTool[];
+}
+
+/**
+ * MCP tools/call 파라미터
+ */
+export interface MCPToolCallParams {
+  name: string;
+  arguments: Record<string, any>;
+}
+
+/**
+ * MCP tools/call 응답
+ */
+export interface MCPToolCallResult {
+  content: Array<{
+    type: 'text';
+    text: string;
+  }>;
+  isError?: boolean;
+}

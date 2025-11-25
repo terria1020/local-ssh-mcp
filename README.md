@@ -4,6 +4,29 @@
 
 Node.js + TypeScript 기반의 로컬 전용 SSH 명령 실행 서버입니다. Claude Code가 원격 서버에 SSH로 접속하여 명령을 실행할 수 있도록 하되, SSH 인증 정보는 로컬 환경에서만 관리하여 외부 노출을 원천 차단합니다.
 
+## 🎉 v3.0.0 주요 업데이트
+
+### 새로운 기능
+1. **MCP JSON-RPC 2.0 프로토콜 지원** 🎯
+   - 표준 MCP 프로토콜 구현 (`tools/list`, `tools/call`)
+   - JSON-RPC 2.0 기반 통신
+   - 기존 REST API와 병행 지원
+
+2. **멀티 서버 인증 정보 관리** 🔐
+   - 여러 서버의 인증 정보를 메모리에 캐싱
+   - 한 번 인증하면 JWT 만료 시까지 재사용
+   - 비밀번호/SSH passphrase 자동 저장
+
+3. **서버별 명령 규칙 관리** 📋
+   - 서버마다 다른 화이트리스트/블랙리스트 적용 가능
+   - `rules/{host}.json` 파일로 서버별 규칙 설정
+   - `rules/default.json` 기본 규칙 사용
+
+4. **향상된 보안 및 편의성** ✨
+   - 인증 정보 중앙 관리 엔드포인트
+   - SSH passphrase 캐싱 지원
+   - 서버별 세밀한 권한 제어
+
 ---
 
 ## 📌 프로젝트 목적
@@ -349,6 +372,255 @@ JWT 인증 필요
   "timestamp": "2025-11-05T12:34:56.789Z"
 }
 ```
+
+### 5. `POST /auth/add-server` - 서버 인증 정보 추가 (v3.0.0 신규)
+
+JWT 인증 필요
+
+서버 인증 정보를 캐시에 추가하여 이후 요청 시 재사용할 수 있습니다.
+
+**요청 형식 (비밀번호 인증):**
+```json
+{
+  "host": "server.example.com",
+  "username": "ubuntu",
+  "password": "your-ssh-password",
+  "port": 22
+}
+```
+
+**요청 형식 (SSH 키 + passphrase):**
+```json
+{
+  "host": "server.example.com",
+  "username": "ubuntu",
+  "privateKeyPath": "/home/user/.ssh/id_rsa",
+  "passphrase": "your-key-passphrase",
+  "port": 22
+}
+```
+
+**응답:**
+```json
+{
+  "success": true,
+  "result": {
+    "message": "Credentials added successfully for ubuntu@server.example.com",
+    "host": "server.example.com",
+    "username": "ubuntu",
+    "port": 22,
+    "authMethod": "password",
+    "cachedUntil": "Server restart or JWT expiration"
+  }
+}
+```
+
+### 6. `GET /auth/list-servers` - 캐시된 서버 목록 조회 (v3.0.0 신규)
+
+JWT 인증 필요
+
+```bash
+curl -H "Authorization: Bearer $MCP_JWT_TOKEN" \
+     http://127.0.0.1:4000/auth/list-servers
+```
+
+**응답:**
+```json
+{
+  "success": true,
+  "result": {
+    "count": 2,
+    "servers": [
+      {
+        "host": "server1.example.com",
+        "username": "ubuntu",
+        "port": 22,
+        "privateKeyPath": "/home/user/.ssh/id_rsa",
+        "addedAt": "2025-11-25T10:30:00.000Z"
+      },
+      {
+        "host": "server2.example.com",
+        "username": "admin",
+        "port": 22,
+        "addedAt": "2025-11-25T10:35:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+### 7. `DELETE /auth/remove-server` - 서버 인증 정보 삭제 (v3.0.0 신규)
+
+JWT 인증 필요
+
+```bash
+curl -X DELETE http://127.0.0.1:4000/auth/remove-server \
+  -H "Authorization: Bearer $MCP_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"host": "server.example.com", "username": "ubuntu"}'
+```
+
+### 8. `POST /mcp/jsonrpc` - MCP JSON-RPC 2.0 엔드포인트 (v3.0.0 신규)
+
+JWT 인증 필요
+
+표준 MCP 프로토콜을 사용하여 SSH 명령을 실행합니다.
+
+**tools/list 요청:**
+```bash
+curl -X POST http://127.0.0.1:4000/mcp/jsonrpc \
+  -H "Authorization: Bearer $MCP_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list"
+  }'
+```
+
+**응답:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "ssh_exec",
+        "description": "Execute SSH commands on remote servers with cached credentials",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "description": "Target server hostname or IP address"
+            },
+            "username": {
+              "type": "string",
+              "description": "SSH username"
+            },
+            "command": {
+              "type": "string",
+              "description": "Command to execute on the remote server"
+            },
+            "port": {
+              "type": "number",
+              "description": "SSH port (default: 22)",
+              "default": 22
+            }
+          },
+          "required": ["host", "username", "command"]
+        }
+      }
+    ]
+  }
+}
+```
+
+**tools/call 요청:**
+```bash
+curl -X POST http://127.0.0.1:4000/mcp/jsonrpc \
+  -H "Authorization: Bearer $MCP_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "ssh_exec",
+      "arguments": {
+        "host": "server.example.com",
+        "username": "ubuntu",
+        "command": "kubectl get pods"
+      }
+    }
+  }'
+```
+
+**응답 (성공):**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "NAME   READY   STATUS    AGE\napp-1   1/1     Running   5m\n\nExit Code: 0"
+      }
+    ],
+    "isError": false
+  }
+}
+```
+
+---
+
+## 📋 서버별 명령 규칙 관리 (v3.0.0)
+
+v3.0.0부터 서버마다 다른 명령 규칙을 적용할 수 있습니다.
+
+### 규칙 파일 구조
+
+```
+rules/
+├── default.json          # 기본 규칙 (모든 서버에 적용)
+├── prod-server.json      # prod-server 호스트 전용 규칙
+└── dev-server.json       # dev-server 호스트 전용 규칙
+```
+
+### 규칙 우선순위
+
+1. 서버 호스트명과 일치하는 파일 (`rules/{host}.json`)
+2. 기본 규칙 파일 (`rules/default.json`)
+
+### 규칙 파일 예시
+
+**`rules/prod-server.json`** (프로덕션 서버 - 엄격한 규칙):
+```json
+{
+  "allowedCommands": [
+    "kubectl get",
+    "kubectl describe",
+    "docker ps",
+    "docker logs",
+    "systemctl status"
+  ],
+  "blockedPatterns": [
+    "rm",
+    "delete",
+    "kill",
+    "shutdown",
+    "reboot"
+  ]
+}
+```
+
+**`rules/dev-server.json`** (개발 서버 - 느슨한 규칙):
+```json
+{
+  "allowedCommands": [
+    "kubectl",
+    "docker",
+    "npm",
+    "yarn",
+    "git",
+    "ls",
+    "cat",
+    "grep"
+  ],
+  "blockedPatterns": [
+    "rm -rf /",
+    "shutdown"
+  ]
+}
+```
+
+### 규칙 적용 방식
+
+- 화이트리스트 (`allowedCommands`): 명령어가 이 목록의 prefix와 일치해야 실행 가능
+- 블랙리스트 (`blockedPatterns`): 명령어에 이 패턴이 포함되면 차단 (우선순위 높음)
+- 파일 변경 시 자동 리로드 (서버 재시작 불필요)
 
 ---
 

@@ -147,13 +147,15 @@ export class SSHManager {
    * @param command 실행할 명령어
    * @param port SSH 포트 (기본값: 22)
    * @param password SSH 비밀번호 (선택적)
+   * @param passphrase SSH 키 패스프레이즈 (선택적, privateKeyPath 사용 시)
    */
   async runCommand(
     host: string,
     username: string,
     command: string,
     port: number = 22,
-    password?: string
+    password?: string,
+    passphrase?: string
   ): Promise<SSHCommandResult> {
     try {
       const config: SSHConfig = {
@@ -161,8 +163,13 @@ export class SSHManager {
         port,
         username,
         password: password, // 비밀번호가 제공되면 사용
-        privateKeyPath: this.sshKeyPath // 비밀번호가 없으면 키 파일 사용
+        privateKeyPath: password ? undefined : this.sshKeyPath // 비밀번호가 없으면 키 파일 사용
       };
+
+      // passphrase 우선순위: 파라미터로 전달된 것 > 환경변수
+      if (passphrase) {
+        this.sshPassphrase = passphrase;
+      }
 
       await this.connect(config);
       const result = await this.executeCommand(command);
