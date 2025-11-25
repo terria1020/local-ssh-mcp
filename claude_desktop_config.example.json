@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "local-ssh-mcp": {
+      "command": "node",
+      "args": [
+        "/home/user/local-ssh-mcp/mcp-stdio-wrapper.js"
+      ],
+      "env": {
+        "MCP_SERVER_URL": "http://127.0.0.1:4000",
+        "TOKEN_PASSPHRASE": "your-token-passphrase-from-env-file"
+      }
+    }
+  }
+}
