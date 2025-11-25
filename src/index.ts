@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mcpRoutes from './routes/mcp';
 import mcpJsonRpcRoutes from './routes/mcp-jsonrpc';
+import mcpSseRoutes from './routes/mcp-sse';
 import authRoutes from './routes/auth';
 import logger from './utils/logger';
 import { MCPResponse } from './types';
@@ -70,7 +71,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // 라우트 등록
 app.use('/auth', authRoutes);           // JWT 토큰 발급 및 인증 정보 관리 엔드포인트
 app.use('/mcp', mcpRoutes);             // MCP REST API 엔드포인트 (기존)
-app.use('/mcp', mcpJsonRpcRoutes);      // MCP JSON-RPC 2.0 엔드포인트 (신규)
+app.use('/mcp', mcpJsonRpcRoutes);      // MCP JSON-RPC 2.0 엔드포인트 (JWT 인증)
+app.use('/mcp', mcpSseRoutes);          // MCP SSE Transport 엔드포인트 (인증 없음)
 
 // 루트 경로
 app.get('/', (_req: Request, res: Response) => {
@@ -80,7 +82,8 @@ app.get('/', (_req: Request, res: Response) => {
     status: 'running',
     authentication: 'JWT-based (30 minute expiry)',
     features: [
-      'MCP JSON-RPC 2.0 Protocol Support',
+      'MCP JSON-RPC 2.0 Protocol Support (JWT auth)',
+      'MCP SSE Transport (no auth, localhost only)',
       'Multi-server credential management',
       'Server-specific command rules',
       'Password/passphrase caching'
@@ -96,7 +99,9 @@ app.get('/', (_req: Request, res: Response) => {
         health: 'GET /mcp/health',
         status: 'GET /mcp/status (requires JWT auth)',
         run: 'POST /mcp/run (requires JWT auth, legacy REST API)',
-        jsonrpc: 'POST /mcp/jsonrpc (MCP JSON-RPC 2.0, requires JWT auth)'
+        jsonrpc: 'POST /mcp/jsonrpc (MCP JSON-RPC 2.0, requires JWT auth)',
+        sse: 'GET /mcp/sse (MCP SSE Transport, no auth)',
+        sseMessage: 'POST /mcp/sse/message (SSE JSON-RPC, no auth)'
       }
     },
     documentation: 'See README.md and CLAUDE.md for usage instructions'
@@ -148,7 +153,8 @@ async function startServer(): Promise<void> {
       logger.info(`📝 Log Level: ${process.env.LOG_LEVEL || 'info'}`);
       logger.info('='.repeat(60));
       logger.info('✨ New Features (v3.0.0):');
-      logger.info('  • MCP JSON-RPC 2.0 Protocol Support');
+      logger.info('  • MCP JSON-RPC 2.0 Protocol Support (JWT auth)');
+      logger.info('  • MCP SSE Transport (no auth, localhost only)');
       logger.info('  • Multi-server credential management');
       logger.info('  • Server-specific command rules');
       logger.info('  • Password/passphrase caching');
@@ -161,6 +167,8 @@ async function startServer(): Promise<void> {
       logger.info(`  GET  http://${HOST}:${PORT}/mcp/status (requires JWT auth)`);
       logger.info(`  POST http://${HOST}:${PORT}/mcp/run (REST API, requires JWT auth)`);
       logger.info(`  POST http://${HOST}:${PORT}/mcp/jsonrpc (MCP JSON-RPC 2.0, requires JWT auth)`);
+      logger.info(`  GET  http://${HOST}:${PORT}/mcp/sse (MCP SSE Transport, no auth)`);
+      logger.info(`  POST http://${HOST}:${PORT}/mcp/sse/message (SSE JSON-RPC, no auth)`);
       logger.info('='.repeat(60));
     });
   } catch (error) {
