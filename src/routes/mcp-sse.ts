@@ -95,6 +95,31 @@ const SSH_EXEC_TOOL: MCPTool = {
 };
 
 /**
+ * initialize 메서드 핸들러
+ */
+async function handleInitialize(
+  id: string | number | null,
+  params: any
+): Promise<JSONRPCSuccessResponse> {
+  logger.info(`MCP SSE initialize request: ${JSON.stringify(params)}`);
+
+  const result = {
+    protocolVersion: '2024-11-05',
+    capabilities: {
+      tools: {},
+      logging: {}
+    },
+    serverInfo: {
+      name: 'local-ssh-mcp',
+      version: '3.0.0'
+    }
+  };
+
+  logger.info('MCP SSE initialize request handled');
+  return createSuccessResponse(id, result);
+}
+
+/**
  * tools/list 메서드 핸들러
  */
 async function handleToolsList(
@@ -251,6 +276,9 @@ async function handleJSONRPCRequest(
 
   // 메서드 라우팅
   switch (request.method) {
+    case 'initialize':
+      return await handleInitialize(request.id || null, request.params);
+
     case 'tools/list':
       return await handleToolsList(request.id || null);
 

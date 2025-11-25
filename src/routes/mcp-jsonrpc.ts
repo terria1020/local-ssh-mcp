@@ -97,6 +97,31 @@ const SSH_EXEC_TOOL: MCPTool = {
 };
 
 /**
+ * initialize 메서드 핸들러
+ */
+async function handleInitialize(
+  id: string | number | null,
+  params: any
+): Promise<JSONRPCSuccessResponse> {
+  logger.info(`MCP initialize request: ${JSON.stringify(params)}`);
+
+  const result = {
+    protocolVersion: '2024-11-05',
+    capabilities: {
+      tools: {},
+      logging: {}
+    },
+    serverInfo: {
+      name: 'local-ssh-mcp',
+      version: '3.0.0'
+    }
+  };
+
+  logger.info('MCP initialize request handled');
+  return createSuccessResponse(id, result);
+}
+
+/**
  * tools/list 메서드 핸들러
  */
 async function handleToolsList(
@@ -263,6 +288,10 @@ router.post('/jsonrpc',
       let response: JSONRPCSuccessResponse | JSONRPCErrorResponse;
 
       switch (request.method) {
+        case 'initialize':
+          response = await handleInitialize(request.id || null, request.params);
+          break;
+
         case 'tools/list':
           response = await handleToolsList(request.id || null);
           break;
