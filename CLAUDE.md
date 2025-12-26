@@ -6,15 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Local SSH MCP Server** - A secure localhost-only proxy server that enables Claude Code to execute SSH commands on remote servers via JSON API, keeping SSH credentials local and never exposing them to Claude.
 
+**Version**: 2.0.0 (JWT-based authentication)
+
 **Core Architecture**: Express.js REST API with layered middleware (auth → validation → SSH execution)
 
-**Security Model** (v2.0.0 - JWT-based):
-- Localhost-only binding (127.0.0.1)
-- JWT authentication with 30-minute expiry
-- Token issuance via passphrase
+**Security Model**:
+- Localhost-only binding (127.0.0.1:4000)
+- JWT authentication with 30-minute expiry (HS256 algorithm)
+- Token issuance via passphrase validation
 - Issuer verification and signature validation
-- Command whitelist/blacklist filtering
-- Ephemeral SSH connections (no persistent state)
+- Command whitelist/blacklist filtering (hot-reloadable via `rules.json`)
+- Ephemeral SSH connections (no persistent state, each request creates fresh connection)
 
 ## Quick Start
 
@@ -110,15 +112,17 @@ Route Handler (src/routes/mcp.ts)
 
 | File | Purpose | Key Details |
 |------|---------|-------------|
-| `src/index.ts` | Express server setup | Binds to 127.0.0.1 only, validates JWT env vars on startup |
-| `src/routes/auth.ts` | JWT token issuance | `POST /auth` with token_passphrase, returns 30-min JWT |
-| `src/routes/mcp.ts` | API endpoints | `/health`, `/status`, `/run` |
-| `src/middleware/auth.ts` | JWT authentication | Verifies JWT signature, issuer, and expiration |
-| `src/middleware/validator.ts` | Command filtering | Loads `rules.json`, watches for file changes with `fs.watch()` |
-| `src/services/ssh-manager.ts` | SSH execution | Singleton pattern, ephemeral connections, dual auth (key/password) |
-| `src/utils/jwt.ts` | JWT utilities | `generateToken()`, `verifyToken()`, `getTokenExpiration()` |
+| `src/index.ts` | Express server setup | Binds to 127.0.0.1 only, validates JWT env vars on startup, graceful shutdown handling |
+| `src/routes/auth.ts` | JWT token issuance | `POST /auth` with token_passphrase, returns 30-min JWT with usage instructions |
+| `src/routes/mcp.ts` | API endpoints | `/health` (no auth), `/status` (auth required), `/run` (auth + validation) |
+| `src/middleware/auth.ts` | JWT authentication | Verifies JWT signature (HS256), issuer, and expiration; returns specific error types |
+| `src/middleware/validator.ts` | Command filtering | Loads `rules.json`, watches for file changes with `fs.watch()`, fallback rules on failure |
+| `src/services/ssh-manager.ts` | SSH execution | Singleton pattern, ephemeral connections, dual auth (key/password), 10s connection timeout |
+| `src/utils/jwt.ts` | JWT utilities | `generateToken()`, `verifyToken()`, `getTokenExpiration()` with typed error responses |
 | `src/utils/logger.ts` | Winston logging | Console + file transports, 5MB rotation, 5 files retained |
+| `src/types/index.ts` | TypeScript definitions | `MCPRunRequest`, `SSHCommandResult`, `MCPResponse`, `JWTPayload`, `AuthRequest/Response` |
 | `rules.json` | Security rules | Whitelist/blacklist, hot-reloadable without server restart |
+| `scripts/ssh-mcp-run.sh` | CLI helper | Bash wrapper for curl, auto-loads `MCP_JWT_TOKEN`, colored output, jq formatting |
 
 ### SSH Connection Management
 
@@ -445,6 +449,42 @@ If manual SSH works but MCP server fails, check:
 - Simpler than raw `curl` commands
 - Automatically handles JWT token from environment
 
+## Implemented Features (v2.0.0)
+
+### API Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/` | GET | No | Service info with version and available endpoints |
+| `/auth` | POST | No | Issue JWT token with `token_passphrase` |
+| `/mcp/health` | GET | No | Health check with uptime, SSH key status, node version |
+| `/mcp/status` | GET | JWT | Detailed status with memory usage, SSH connection state |
+| `/mcp/run` | POST | JWT + Validation | Execute SSH command on remote server |
+
+### Security Features
+
+1. **Network Isolation**: Binds to `127.0.0.1` only, CORS restricted to localhost
+2. **JWT Authentication**: HS256 signed tokens, 30-min expiry, issuer validation
+3. **Command Validation**: Whitelist prefix matching, blacklist substring blocking
+4. **SSH Credential Protection**: Keys never transmitted, passwords only over localhost
+5. **Request Limits**: 10kb body limit, 10s SSH connection timeout
+
+### Error Handling
+
+- **401 Errors**: `expired` (token timeout), `issuer_mismatch` (wrong source), `invalid` (bad signature)
+- **403 Errors**: Command validation failures with specific reason
+- **500 Errors**: SSH connection failures, server configuration errors
+- **Graceful Shutdown**: SIGTERM/SIGINT handling with clean process exit
+- **Unhandled Rejection**: Promise rejection logging without crash
+
+### Logging
+
+- **Transports**: Console + file (`logs/combined.log`, `logs/error.log`)
+- **Rotation**: 5MB max size, 5 files retained
+- **Levels**: `error`, `warn`, `info` (production default), `debug` (development)
+- **Request Logging**: Method, path, IP for all requests
+- **Security Logging**: Auth failures, blocked commands with IP tracking
+
 ## README Highlights
 
 **From README.md**:
@@ -464,3 +504,35 @@ If manual SSH works but MCP server fails, check:
 - Production mode: `NODE_ENV=production`, log level `warn` or `error`
 - Never store `TOKEN_PASSPHRASE` in zshrc - only store issued JWT tokens
 - Re-issue JWT tokens every 30 minutes (or as needed)
+
+## TypeScript Types Reference
+
+```typescript
+// Core request/response types (src/types/index.ts)
+interface MCPRunRequest {
+  host: string;
+  username: string;
+  command: string;
+  port?: number;      // default: 22
+  password?: string;  // optional, overrides SSH key
+}
+
+interface SSHCommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface MCPResponse<T = any> {
+  success: boolean;
+  result?: T;
+  error?: string;
+  timestamp?: string;
+}
+
+interface JWTPayload {
+  issuer: string;
+  iat: number;  // issued at (unix timestamp)
+  exp: number;  // expiration (unix timestamp)
+}
+```
