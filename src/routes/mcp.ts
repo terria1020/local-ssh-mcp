@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { MCPRunRequest, MCPResponse, SSHCommandResult } from '../types';
-import { authenticateToken } from '../middleware/auth';
 import { validateCommandMiddleware } from '../middleware/validator';
 import { getSSHManager } from '../services/ssh-manager';
 import logger from '../utils/logger';
@@ -10,9 +9,9 @@ const router = Router();
 /**
  * POST /mcp/run
  * SSH 명령 실행 엔드포인트
+ * v3.0.0: JWT 인증 제거 - MCP 프로토콜 기반으로 전환 예정
  */
 router.post('/run',
-  authenticateToken,
   validateCommandMiddleware,
   async (req: Request, res: Response): Promise<void> => {
     const { host, username, command, port = 22, password } = req.body as MCPRunRequest;
@@ -90,10 +89,10 @@ router.get('/health', (_req: Request, res: Response): void => {
 
 /**
  * GET /mcp/status
- * 인증이 필요한 상세 상태 확인 엔드포인트
+ * 상세 상태 확인 엔드포인트
+ * v3.0.0: JWT 인증 제거
  */
 router.get('/status',
-  authenticateToken,
   (_req: Request, res: Response): void => {
     const sshManager = getSSHManager();
     const memoryUsage = process.memoryUsage();

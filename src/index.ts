@@ -3,7 +3,6 @@ import helmet from 'helmet';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mcpRoutes from './routes/mcp';
-import authRoutes from './routes/auth';
 import logger from './utils/logger';
 import { MCPResponse } from './types';
 
@@ -15,20 +14,12 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const HOST = '127.0.0.1'; // 로컬 호스트만 허용
 
-// 환경변수 검증
+// 환경변수 검증 (v3.0.0 - JWT 제거)
 function validateEnvironment(): void {
-  // JWT 인증 관련 필수 환경변수
-  const requiredEnvVars = ['TOKEN_PASSPHRASE', 'JWT_SECRET_KEY', 'JWT_ISSUER'];
-  const missing = requiredEnvVars.filter(varName => !process.env[varName]);
-
-  if (missing.length > 0) {
-    logger.error(`Missing required environment variables: ${missing.join(', ')}`);
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
-
-  // SSH_KEY_PATH는 선택적 (비밀번호 인증을 사용할 수도 있음)
+  // v3.0.0: JWT 환경변수 더 이상 필요하지 않음
+  // SSH_KEY_PATH는 선택적 (credentials.json 파일 사용 시 불필요)
   if (!process.env.SSH_KEY_PATH) {
-    logger.warn('SSH_KEY_PATH not set - password-based authentication will be required');
+    logger.info('SSH_KEY_PATH not set - will use credentials.json for SSH authentication');
   }
 
   logger.info('Environment variables validated successfully');
@@ -67,21 +58,20 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // 라우트 등록
-app.use('/auth', authRoutes);  // JWT 토큰 발급 엔드포인트
+// v3.0.0: /auth 엔드포인트 제거 (JWT 인증 제거)
 app.use('/mcp', mcpRoutes);    // MCP API 엔드포인트
 
 // 루트 경로
 app.get('/', (_req: Request, res: Response) => {
   res.json({
     service: 'Local SSH MCP Server',
-    version: '2.0.0',
+    version: '3.0.0',
     status: 'running',
-    authentication: 'JWT-based (30 minute expiry)',
+    protocol: 'MCP (Model Context Protocol)',
+    transport: 'Streamable HTTP + SSE',
     endpoints: {
-      auth: 'POST /auth (issue JWT token with token_passphrase)',
-      health: 'GET /mcp/health',
-      status: 'GET /mcp/status (requires JWT auth)',
-      run: 'POST /mcp/run (requires JWT auth)'
+      mcp: 'POST/GET/DELETE /mcp (MCP protocol)',
+      health: 'GET /mcp/health'
     },
     documentation: 'See README.md for usage instructions'
   });
@@ -122,20 +112,20 @@ async function startServer(): Promise<void> {
     // 서버 리스닝 시작
     app.listen(Number(PORT), HOST, () => {
       logger.info('='.repeat(60));
-      logger.info('🚀 Local SSH MCP Server Started (v2.0.0)');
+      logger.info('Local SSH MCP Server Started (v3.0.0)');
       logger.info('='.repeat(60));
-      logger.info(`📍 Server listening on: http://${HOST}:${PORT}`);
-      logger.info(`🔐 SSH Key Path: ${process.env.SSH_KEY_PATH || 'Not configured'}`);
-      logger.info(`🛡️  Authentication: JWT-based (30 minute expiry)`);
-      logger.info(`🔑 JWT Issuer: ${process.env.JWT_ISSUER}`);
-      logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📝 Log Level: ${process.env.LOG_LEVEL || 'info'}`);
+      logger.info(`Server listening on: http://${HOST}:${PORT}`);
+      logger.info(`SSH Key Path: ${process.env.SSH_KEY_PATH || 'Not configured (use credentials.json)'}`);
+      logger.info(`Protocol: MCP (Model Context Protocol)`);
+      logger.info(`Transport: Streamable HTTP + SSE`);
+      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      logger.info(`Log Level: ${process.env.LOG_LEVEL || 'info'}`);
       logger.info('='.repeat(60));
       logger.info('Available endpoints:');
-      logger.info(`  POST http://${HOST}:${PORT}/auth (obtain JWT token)`);
       logger.info(`  GET  http://${HOST}:${PORT}/mcp/health`);
-      logger.info(`  GET  http://${HOST}:${PORT}/mcp/status (requires JWT auth)`);
-      logger.info(`  POST http://${HOST}:${PORT}/mcp/run (requires JWT auth)`);
+      logger.info(`  POST http://${HOST}:${PORT}/mcp (MCP JSON-RPC)`);
+      logger.info(`  GET  http://${HOST}:${PORT}/mcp (SSE stream)`);
+      logger.info(`  DELETE http://${HOST}:${PORT}/mcp (close session)`);
       logger.info('='.repeat(60));
     });
   } catch (error) {
