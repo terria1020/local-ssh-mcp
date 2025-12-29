@@ -3,6 +3,10 @@ import helmet from 'helmet';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mcpRoutes from './routes/mcp';
+import mcpTransportRouter from './routes/mcp-transport';
+import { validateOrigin } from './middleware/origin-validator';
+import { initializeCredentialManager, getCredentialManager } from './services/credential-manager';
+import { disposeSessionManager } from './services/session-manager';
 import logger from './utils/logger';
 import { MCPResponse } from './types';
 
@@ -42,8 +46,8 @@ app.use(helmet({
 // CORS 설정 (로컬 호스트만 허용)
 app.use(cors({
   origin: ['http://127.0.0.1', 'http://localhost'],
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id'],
   credentials: true
 }));
 
@@ -58,17 +62,25 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 });
 
 // 라우트 등록
-// v3.0.0: /auth 엔드포인트 제거 (JWT 인증 제거)
-app.use('/mcp', mcpRoutes);    // MCP API 엔드포인트
+// v3.0.0: MCP Transport 라우트 (메인 MCP 프로토콜 엔드포인트)
+app.use('/mcp', validateOrigin, mcpTransportRouter);
+
+// 기존 MCP 라우트 (health, status 등 호환용)
+app.use('/mcp', mcpRoutes);
 
 // 루트 경로
 app.get('/', (_req: Request, res: Response) => {
+  const credManager = getCredentialManager();
+
   res.json({
     service: 'Local SSH MCP Server',
     version: '3.0.0',
     status: 'running',
     protocol: 'MCP (Model Context Protocol)',
     transport: 'Streamable HTTP + SSE',
+    credentials: {
+      loaded: credManager.count,
+    },
     endpoints: {
       mcp: 'POST/GET/DELETE /mcp (MCP protocol)',
       health: 'GET /mcp/health'
@@ -109,6 +121,11 @@ async function startServer(): Promise<void> {
     // 환경변수 검증
     validateEnvironment();
 
+    // CredentialManager 초기화
+    await initializeCredentialManager();
+    const credManager = getCredentialManager();
+    logger.info(`Credentials loaded: ${credManager.count} credentials available`);
+
     // 서버 리스닝 시작
     app.listen(Number(PORT), HOST, () => {
       logger.info('='.repeat(60));
@@ -116,6 +133,7 @@ async function startServer(): Promise<void> {
       logger.info('='.repeat(60));
       logger.info(`Server listening on: http://${HOST}:${PORT}`);
       logger.info(`SSH Key Path: ${process.env.SSH_KEY_PATH || 'Not configured (use credentials.json)'}`);
+      logger.info(`Credentials: ${credManager.count} loaded`);
       logger.info(`Protocol: MCP (Model Context Protocol)`);
       logger.info(`Transport: Streamable HTTP + SSE`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -135,15 +153,27 @@ async function startServer(): Promise<void> {
 }
 
 // Graceful shutdown 처리
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM signal received: closing HTTP server');
-  process.exit(0);
-});
+async function gracefulShutdown(signal: string): Promise<void> {
+  logger.info(`${signal} signal received: closing HTTP server`);
 
-process.on('SIGINT', () => {
-  logger.info('SIGINT signal received: closing HTTP server');
-  process.exit(0);
-});
+  try {
+    // CredentialManager 정리
+    const credManager = getCredentialManager();
+    credManager.dispose();
+
+    // SessionManager 정리
+    await disposeSessionManager();
+
+    logger.info('Cleanup completed, exiting');
+    process.exit(0);
+  } catch (error) {
+    logger.error(`Error during shutdown: ${error}`);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // 처리되지 않은 프로미스 거부 처리
 process.on('unhandledRejection', (reason, promise) => {
