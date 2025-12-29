@@ -1,5 +1,5 @@
 {
-  "allowedCommands": ["kubectl", "docker", "htop", "ls", "df", "free", "uptime", "tail", "grep", "cat /var/log", "ps", "top", "netstat", "ss", "journalctl", "sudo kubectl get", "sudo kubectl describe"],
+  "allowedCommands": ["kubectl", "docker", "htop", "ls", "df", "free", "uptime", "tail", "grep", "cat /var/log", "ps", "top", "netstat", "ss", "journalctl"],
   "blockedPatterns": [
     "rm",
     "rm -rf",
@@ -10,26 +10,24 @@
     "halt",
     "poweroff",
     "passwd",
-
+    "sudo",
+    "su",
     "login",
     "logout",
-
     "useradd",
     "userdel",
     "usermod",
     "groupadd",
     "groupdel",
     "newgrp",
-
     "systemctl",
-    "service stop",
+    "service",
     "chkconfig",
     "rc-service",
     "initctl",
     "kill",
     "killall",
     "pkill",
-
     "iptables",
     "ip6tables",
     "nft",
@@ -41,14 +39,12 @@
     "route add",
     "brctl",
     "tc",
-
     "mount",
     "umount",
     "losetup",
     "fsck",
     "resize2fs",
     "cryptsetup",
-
     "apt",
     "apt-get",
     "aptitude",
@@ -65,7 +61,6 @@
     "npm",
     "go install",
     "cargo install",
-
     "curl",
     "wget",
     "ftp",
@@ -74,7 +69,6 @@
     "scp",
     "telnet",
     "ssh",
-
     "bash",
     "sh",
     "zsh",
@@ -90,7 +84,7 @@
     "cron",
     "crontab",
     "watch",
-
+    "vi",
     "vim",
     "nano",
     "sed -i",
@@ -98,7 +92,6 @@
     "tee",
     ">",
     ">>",
-
     "kubectl delete",
     "kubectl apply",
     "kubectl patch",
@@ -109,11 +102,9 @@
     "kubectl scale",
     "kubectl cordon",
     "kubectl drain",
-
     "chmod 777",
     "chown",
     "chgrp",
-
     "cat ~/.ssh",
     "cat /etc/shadow",
     "cat /etc/passwd",
@@ -123,7 +114,6 @@
     "cat /var/lib/kubelet/pki",
     "cat /etc/kubernetes",
     "cat /var/lib/etcd",
-
     "mkfs",
     "dd if=",
     "> /dev/",
