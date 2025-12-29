@@ -13,6 +13,7 @@ import {
 import { SSHConfig } from '../types';
 import { getCredentialManager } from '../services/credential-manager';
 import { getSSHManager } from '../services/ssh-manager';
+import { getSessionManager } from '../services/session-manager';
 import { validateCommand } from '../middleware/validator';
 import logger from '../utils/logger';
 
@@ -147,7 +148,47 @@ async function executeSSHCommand(
     };
   }
 
-  // 3. SSH 연결 설정 구성
+  // 3. 모드에 따라 실행
+  logger.info(`[SSH] Execute (${sessionMode}): ${command} on ${credentialId} (${credential.host})`);
+
+  try {
+    if (sessionMode === 'persistent') {
+      // Persistent 모드: SessionManager 사용
+      return await executePersistentCommand(credentialId, command, credential.host);
+    } else {
+      // Ephemeral 모드: 단일 연결
+      return await executeEphemeralCommand(credentialId, command, credential.host, credManager);
+    }
+  } catch (error) {
+    logger.error(`[SSH] Execution failed: ${error}`);
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          code: JSON_RPC_ERROR_CODES.SSH_ERROR,
+          credentialId,
+          host: credential.host,
+        }),
+      }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Ephemeral 모드: 단일 연결로 명령 실행 후 종료
+ */
+async function executeEphemeralCommand(
+  credentialId: string,
+  command: string,
+  host: string,
+  credManager: ReturnType<typeof getCredentialManager>
+): Promise<MCPToolCallResult> {
+  const credential = credManager.getCredential(credentialId)!;
+
+  // SSH 연결 설정 구성
   const sshConfig: SSHConfig = {
     host: credential.host,
     port: credential.port,
@@ -200,58 +241,72 @@ async function executeSSHCommand(
 
     sshConfig.privateKeyPath = credential.privateKeyPath;
 
-    // 패스프레이즈가 있으면 환경변수로 전달 (기존 SSHManager 호환)
+    // 패스프레이즈가 있으면 환경변수로 전달
     const passphrase = credManager.getDecodedPassphrase(credentialId);
     if (passphrase) {
       process.env.SSH_PASSPHRASE = passphrase;
     }
   }
 
-  // 4. SSH 명령 실행
-  logger.info(`[SSH] Execute: ${command} on ${credentialId} (${credential.host})`);
+  const sshManager = getSSHManager();
 
-  try {
-    const sshManager = getSSHManager();
+  await sshManager.connect(sshConfig);
+  const result = await sshManager.executeCommand(command);
+  await sshManager.disconnect();
 
-    // Ephemeral 모드: 단일 명령 실행
-    // Persistent 모드: Phase 4에서 구현
-    if (sessionMode === 'persistent') {
-      // TODO: Phase 4에서 SessionManager 통합
-      logger.warn('[SSH] Persistent mode not yet implemented, using ephemeral');
-    }
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        credentialId,
+        host,
+        sessionMode: 'ephemeral',
+      }),
+    }],
+  };
+}
 
-    await sshManager.connect(sshConfig);
-    const result = await sshManager.executeCommand(command);
-    await sshManager.disconnect();
+/**
+ * Persistent 모드: 세션 유지하면서 명령 실행
+ */
+async function executePersistentCommand(
+  credentialId: string,
+  command: string,
+  host: string
+): Promise<MCPToolCallResult> {
+  const sessionManager = getSessionManager();
 
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          stdout: result.stdout,
-          stderr: result.stderr,
-          exitCode: result.exitCode,
-          credentialId,
-          host: credential.host,
-        }),
-      }],
-    };
-  } catch (error) {
-    logger.error(`[SSH] Execution failed: ${error}`);
+  // 기존 세션 찾거나 새로 생성
+  const sshSession = await sessionManager.getOrCreateSession(credentialId);
 
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          error: error instanceof Error ? error.message : String(error),
-          code: JSON_RPC_ERROR_CODES.SSH_ERROR,
-          credentialId,
-          host: credential.host,
-        }),
-      }],
-      isError: true,
-    };
-  }
+  // 명령 실행
+  const result = await sessionManager.executeCommand(sshSession.id, command);
+
+  // 세션 정보 조회
+  const sessionInfos = sessionManager.getSessionInfo(credentialId);
+  const currentSessionInfo = sessionInfos.find(s => s.sessionId === sshSession.id);
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        credentialId,
+        host,
+        sessionMode: 'persistent',
+        sessionInfo: currentSessionInfo || {
+          sessionId: sshSession.id,
+          commandCount: 1,
+          cwd: '/tmp',
+        },
+      }),
+    }],
+  };
 }
 
 /**
@@ -276,15 +331,18 @@ async function listCredentials(): Promise<MCPToolCallResult> {
  * 세션 정보 조회
  */
 async function getSessionInfo(
-  _credentialId?: string
+  credentialId?: string
 ): Promise<MCPToolCallResult> {
-  // TODO: Phase 4에서 SessionManager와 통합
+  const sessionManager = getSessionManager();
+  const sessions = sessionManager.getSessionInfo(credentialId);
+
   return {
     content: [{
       type: 'text',
       text: JSON.stringify({
-        sessions: [],
-        message: 'Session management will be available in Phase 4',
+        sessions,
+        count: sessions.length,
+        activeCount: sessionManager.activeSessionCount,
       }),
     }],
   };
