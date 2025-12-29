@@ -46,3 +46,6 @@ export interface ValidationResult {
 
 // v3.0.0: JWT 관련 타입 제거됨
 // JWTPayload, AuthRequest, AuthResponse는 더 이상 사용하지 않음
+
+// MCP 프로토콜 타입 re-export
+export * from './mcp';
