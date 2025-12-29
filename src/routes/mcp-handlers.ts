@@ -98,6 +98,10 @@ async function handleInitialize(
 
   logger.info(`[MCP] Initialize request from ${initParams.clientInfo?.name || 'unknown'}`);
 
+  // MCP 스펙에서는 initialized notification 이후에 initialized = true로 설정해야 하지만,
+  // 많은 클라이언트가 initialize 응답 후 바로 요청을 보내므로 여기서 설정
+  session.initialized = true;
+
   const result: MCPInitializeResult = {
     protocolVersion: MCP_PROTOCOL_VERSION,
     capabilities: {

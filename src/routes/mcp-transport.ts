@@ -46,11 +46,16 @@ setInterval(() => {
 // ============================================
 
 function getOrCreateSession(req: Request): MCPSession {
-  const sessionId = req.headers[MCP_HEADERS.SESSION_ID.toLowerCase()] as string;
+  // Express normalizes headers to lowercase
+  const headerKey = MCP_HEADERS.SESSION_ID.toLowerCase();
+  const sessionId = req.headers[headerKey] as string;
+
+  logger.debug(`[MCP] Looking for session: ${sessionId}, available: ${Array.from(sessions.keys()).join(', ')}`);
 
   if (sessionId && sessions.has(sessionId)) {
     const session = sessions.get(sessionId)!;
     session.lastActivityAt = new Date();
+    logger.debug(`[MCP] Found existing session: ${sessionId}, initialized: ${session.initialized}`);
     return session;
   }
 
