@@ -1,94 +1,77 @@
 # Local SSH MCP Server
 
-**Claude Code를 위한 안전한 로컬 SSH 프록시 서버**
+**Claude Code를 위한 안전한 로컬 SSH MCP 서버**
 
-Node.js + TypeScript 기반의 로컬 전용 SSH 명령 실행 서버입니다. Claude Code가 원격 서버에 SSH로 접속하여 명령을 실행할 수 있도록 하되, SSH 인증 정보는 로컬 환경에서만 관리하여 외부 노출을 원천 차단합니다.
+Node.js + TypeScript 기반의 MCP(Model Context Protocol) 서버입니다. Claude Code가 원격 서버에 SSH로 접속하여 명령을 실행할 수 있도록 하되, SSH 인증 정보는 로컬 환경에서만 관리하여 외부 노출을 원천 차단합니다.
+
+**Version**: 3.0.0 (MCP Protocol with Streamable HTTP/SSE)
+
+---
+
+## 📌 v3.0.0 주요 변경사항
+
+| 항목 | v2.0.0 | v3.0.0 |
+|------|--------|--------|
+| 프로토콜 | REST API | MCP (JSON-RPC 2.0) |
+| 인증 | JWT 토큰 | 세션 기반 (localhost 전용) |
+| 자격증명 | 환경변수 (단일) | `credentials.json` (다중) |
+| SSH 모드 | Ephemeral only | Ephemeral + Persistent |
+| Claude Code 연동 | curl/스크립트 | MCP 네이티브 |
 
 ---
 
 ## 📌 프로젝트 목적
 
-이 프로젝트는 다음 세 가지 목적으로 개발되었습니다:
+### 1. 🔒 보안 강화
 
-### 1. 🔒 보안 강화 (다른 오픈소스 MCP의 백도어 불안 해소)
+기존 오픈소스 MCP 프로젝트들의 보안 우려를 해결합니다:
 
-기존 오픈소스 MCP 프로젝트들은 다음과 같은 보안 우려가 있습니다:
-- SSH 키 파일이 외부 프로세스에 노출될 위험
-- 인증 정보가 네트워크를 통해 전송될 가능성
-- 신뢰할 수 없는 코드에 의한 백도어 설치 가능성
-
-**Local SSH MCP는 이러한 문제를 해결합니다:**
 - ✅ SSH 키 파일은 로컬 파일시스템에만 존재
 - ✅ 서버는 `127.0.0.1`에서만 리스닝 (외부 접근 차단)
-- ✅ JWT 기반 인증으로 무단 접근 방지
-- ✅ 화이트리스트/블랙리스트 기반 명령 필터링
-- ✅ 모든 코드가 공개되어 있어 투명한 검증 가능
+- ✅ Origin 헤더 검증 (DNS rebinding 공격 방지)
+- ✅ 화이트리스트/블랙리스트 기반 명령 필터링 (Hot-reload)
+- ✅ 자격증명 파일 기반 관리 (`.gitignore` 처리)
 
-### 2. 🎓 교육성 (MCP 아키텍처 학습)
+### 2. 🎓 MCP 아키텍처 학습
 
-이 프로젝트는 MCP(Model Context Protocol) 서버를 직접 구현하며 다음을 학습할 수 있습니다:
-- REST API 기반 MCP 서버 설계 방법
-- Claude Code와의 통신 방식
-- 보안을 고려한 인증/인가 구현
-- TypeScript + Express.js 실무 패턴
+이 프로젝트를 통해 다음을 학습할 수 있습니다:
 
-**학습 포인트:**
-- MCP 서버는 반드시 복잡한 프로토콜을 따를 필요 없이 단순 REST API로도 구현 가능
-- Claude Code는 Bash 도구를 통해 간접적으로 MCP 서버와 통신 가능
-- 로컬 전용 서버 설계 시 보안 고려사항
+- MCP (Model Context Protocol) 서버 구현
+- JSON-RPC 2.0 over HTTP/SSE 통신
+- Claude Code 네이티브 연동
 
-### 3. 📚 학습성 (Node.js + TypeScript 실무 예제)
+### 3. 📚 Node.js + TypeScript 실무 예제
 
-실무에서 자주 사용하는 기술 스택의 실전 예제로 활용할 수 있습니다:
-- **Express.js**: REST API 서버 구축
-- **TypeScript**: 타입 안전성과 개발 생산성 향상
-- **JWT**: 토큰 기반 인증 구현
-- **node-ssh**: SSH 클라이언트 라이브러리 사용
+- **Express.js**: HTTP 서버 구축
+- **TypeScript**: 타입 안전성
+- **node-ssh**: SSH 클라이언트
 - **Winston**: 구조화된 로깅
-- **dotenv**: 환경변수 관리 패턴
-
-**실무 학습 자료:**
-- 미들웨어 체이닝 패턴
-- 에러 핸들링 베스트 프랙티스
-- 환경 분리 (development/production)
-- 보안 헤더 설정 (Helmet)
-- 비동기 프로그래밍 패턴
 
 ---
 
 ## 🚀 주요 기능
 
+### MCP 도구 (Tools)
+
+| 도구 | 설명 |
+|------|------|
+| `ssh_execute` | 원격 서버에서 SSH 명령 실행 |
+| `ssh_list_credentials` | 등록된 자격증명 목록 조회 |
+| `ssh_session_info` | SSH 세션 상태 조회 |
+
 ### 보안 기능
 
-- **JWT 인증**: Passphrase 기반 JWT 토큰 발급 (30분 유효)
-- **명령 필터링**: 화이트리스트/블랙리스트 기반 명령 검증
-- **로컬 전용**: 127.0.0.1에서만 리스닝, 외부 접근 차단
-- **SSH 키 보호**: 키 파일 경로는 `.env`로만 관리, 코드에 하드코딩 금지
-- **Hot-reload 룰**: `rules.json` 파일 변경 시 서버 재시작 없이 즉시 반영
+- **localhost 전용**: 127.0.0.1에서만 리스닝
+- **Origin 검증**: DNS rebinding 공격 방지
+- **명령 필터링**: 화이트리스트/블랙리스트 기반 검증
+- **Hot-reload**: `rules.json` 변경 시 즉시 반영
 
-### 지원하는 인증 방식
+### SSH 연결 모드
 
-1. **SSH 키 기반 인증** (권장)
-   - `~/.ssh/id_rsa` 등 로컬 SSH 키 파일 사용
-   - Passphrase 보호 키 지원
-
-2. **비밀번호 인증**
-   - 요청별로 비밀번호 전송
-   - 로컬호스트 내에서만 전송되므로 상대적으로 안전
-
-### 명령 필터링 예시
-
-**허용된 명령 (화이트리스트)**:
-```
-kubectl, docker, htop, ls, df, free, uptime, tail, grep,
-cat /var/log, ps, top, netstat, ss, journalctl, systemctl status
-```
-
-**차단된 패턴 (블랙리스트)**:
-```
-rm -rf, shutdown, reboot, passwd, chmod 777, cat ~/.ssh,
-mkfs, dd if=, curl | bash, nc -l, iptables, ufw, firewall-cmd
-```
+| 모드 | 설명 |
+|------|------|
+| **Ephemeral** (기본) | 명령마다 새 연결 생성/종료 |
+| **Persistent** | 연결 유지, cwd 추적, 5분 타임아웃 |
 
 ---
 
@@ -98,12 +81,10 @@ mkfs, dd if=, curl | bash, nc -l, iptables, ufw, firewall-cmd
 |---------|------|------|
 | 런타임 | Node.js 18+ | JavaScript 실행 환경 |
 | 언어 | TypeScript | 타입 안전성 |
-| 웹 프레임워크 | Express.js | REST API 서버 |
+| 웹 프레임워크 | Express.js | HTTP/SSE 서버 |
 | SSH 클라이언트 | node-ssh | SSH 연결 및 명령 실행 |
-| 인증 | jsonwebtoken | JWT 토큰 생성/검증 |
 | 로깅 | Winston | 구조화된 로깅 |
 | 보안 | Helmet | 보안 헤더 설정 |
-| 환경변수 | dotenv | 설정 관리 |
 
 ---
 
@@ -117,66 +98,71 @@ cd local-ssh-mcp
 npm install
 ```
 
-### 2. 환경변수 설정
+### 2. 자격증명 설정
 
-`.env.example`을 복사하여 `.env` 파일 생성:
+```bash
+cp credentials.example.json credentials.json
+```
+
+`credentials.json` 편집:
+
+```json
+{
+  "version": "1.0",
+  "credentials": [
+    {
+      "id": "my-server",
+      "name": "My Production Server",
+      "host": "server.example.com",
+      "port": 22,
+      "username": "ubuntu",
+      "authType": "key",
+      "privateKeyPath": "/Users/you/.ssh/id_rsa"
+    },
+    {
+      "id": "dev-server",
+      "name": "Development Server",
+      "host": "dev.example.com",
+      "port": 22,
+      "username": "developer",
+      "authType": "password",
+      "password": "base64-encoded-password"
+    }
+  ]
+}
+```
+
+**비밀번호 Base64 인코딩:**
+
+```bash
+echo -n "your-password" | base64
+```
+
+### 3. 환경변수 설정 (선택)
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` 파일 편집 (v2.0.0 - JWT 인증):
+`.env` 파일:
 
 ```env
-# 서버 포트
 PORT=4000
-
-# 환경 (development | production)
-NODE_ENV=development
-
-# SSH 인증 정보
-SSH_KEY_PATH=/Users/your-username/.ssh/id_rsa
-SSH_PASSPHRASE=your-ssh-key-passphrase  # SSH 키에 passphrase가 있는 경우만
-
-# JWT 인증 설정 (v2.0.0)
-TOKEN_PASSPHRASE=your-super-secret-passphrase-here  # JWT 토큰 발급용 passphrase
-JWT_SECRET_KEY=your-jwt-secret-key-here              # JWT 서명용 비밀키
-JWT_ISSUER=local-ssh-mcp                              # JWT 발급자
-
-# 로그 레벨
-LOG_LEVEL=info  # error, warn, info, debug
+LOG_LEVEL=info
+SESSION_TIMEOUT=300000
 ```
 
-**보안 권장사항:**
-```bash
-# 강력한 passphrase 생성
-openssl rand -hex 32
-
-# 강력한 JWT 비밀키 생성
-openssl rand -hex 64
-```
-
-### 3. TypeScript 컴파일
+### 4. 빌드 및 실행
 
 ```bash
+# 빌드
 npm run build
-```
 
-### 4. 서버 실행
-
-**프로덕션 모드:**
-```bash
+# 프로덕션 실행
 npm start
-```
 
-**개발 모드 (ts-node, 파일 변경 감지):**
-```bash
+# 개발 모드
 npm run dev
-```
-
-**백그라운드 실행:**
-```bash
-nohup npm start > logs/server.log 2>&1 &
 ```
 
 ### 5. 서버 확인
@@ -185,260 +171,83 @@ nohup npm start > logs/server.log 2>&1 &
 curl http://127.0.0.1:4000/mcp/health
 ```
 
-예상 응답:
-```json
-{
-  "status": "ok",
-  "timestamp": "2025-11-05T12:34:56.789Z",
-  "uptime": 123.456,
-  "sshKeyConfigured": true,
-  "environment": {
-    "nodeVersion": "v20.11.0",
-    "platform": "darwin",
-    "pid": 12345
-  }
-}
-```
-
 ---
 
-## 🔐 JWT 인증 사용법 (v2.0.0)
+## 🔗 Claude Code 연동 가이드
 
-### 1단계: JWT 토큰 발급
+### 방법 1: HTTP/SSE 방식 (권장)
 
-서버에 passphrase를 전송하여 JWT 토큰을 발급받습니다:
-
-```bash
-curl -X POST http://127.0.0.1:4000/auth \
-  -H "Content-Type: application/json" \
-  -d '{"token_passphrase": "your-passphrase-from-env"}'
-```
-
-응답:
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expiresIn": "30m",
-  "message": "JWT token issued successfully",
-  "usage": {
-    "shell": "export MCP_JWT_TOKEN=\"eyJhbGciOiJI...\"",
-    "curl": "curl -H \"Authorization: Bearer eyJhbGciOiJI...\""
-  }
-}
-```
-
-### 2단계: Shell 환경변수 설정
-
-발급받은 JWT 토큰을 환경변수로 저장:
-
-```bash
-# zsh 사용자 (macOS 기본)
-echo 'export MCP_JWT_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."' >> ~/.zshrc
-source ~/.zshrc
-
-# bash 사용자
-echo 'export MCP_JWT_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."' >> ~/.bashrc
-source ~/.bashrc
-```
-
-**중요:**
-- JWT 토큰은 30분 후 만료됨
-- 만료 시 위 1단계로 재발급
-- **절대 TOKEN_PASSPHRASE를 shell 파일에 저장하지 마세요** (보안 위험)
-
-### 3단계: API 요청 시 JWT 사용
-
-```bash
-# 헬퍼 스크립트 사용 (자동으로 $MCP_JWT_TOKEN 사용)
-./scripts/ssh-mcp-run.sh server.com ubuntu "kubectl get pods"
-
-# 또는 직접 curl 사용
-curl -X POST http://127.0.0.1:4000/mcp/run \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_JWT_TOKEN" \
-  -d '{
-    "host": "server.com",
-    "username": "ubuntu",
-    "command": "kubectl get pods"
-  }'
-```
-
----
-
-## 📡 API 엔드포인트
-
-### 1. `POST /auth` - JWT 토큰 발급
-
-**요청:**
-```json
-{
-  "token_passphrase": "your-passphrase-from-env"
-}
-```
-
-**응답:**
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expiresIn": "30m"
-}
-```
-
-### 2. `GET /mcp/health` - 서버 상태 확인
-
-인증 불필요
-
-```bash
-curl http://127.0.0.1:4000/mcp/health
-```
-
-### 3. `GET /mcp/status` - 상세 상태 확인
-
-JWT 인증 필요
-
-```bash
-curl -H "Authorization: Bearer $MCP_JWT_TOKEN" \
-     http://127.0.0.1:4000/mcp/status
-```
-
-### 4. `POST /mcp/run` - SSH 명령 실행
-
-JWT 인증 필요
-
-**요청 형식 (SSH 키 인증):**
-```json
-{
-  "host": "server.example.com",
-  "username": "ubuntu",
-  "command": "kubectl get pods",
-  "port": 22
-}
-```
-
-**요청 형식 (비밀번호 인증):**
-```json
-{
-  "host": "server.example.com",
-  "username": "ubuntu",
-  "password": "your-ssh-password",
-  "command": "kubectl get pods",
-  "port": 22
-}
-```
-
-**응답 형식 (성공):**
-```json
-{
-  "success": true,
-  "result": {
-    "stdout": "NAME   READY   STATUS    AGE\napp-1   1/1     Running   5m",
-    "stderr": "",
-    "exitCode": 0
-  },
-  "timestamp": "2025-11-05T12:34:56.789Z"
-}
-```
-
-**응답 형식 (실패):**
-```json
-{
-  "success": false,
-  "error": "SSH connection failed: Connection timeout",
-  "timestamp": "2025-11-05T12:34:56.789Z"
-}
-```
-
----
-
-## 🎯 Claude Code 연동 가이드
-
-### 설정 방법
-
-#### 1. MCP 서버 실행
-
-터미널에서 MCP 서버를 실행합니다:
+#### 1단계: MCP 서버 실행
 
 ```bash
 cd /path/to/local-ssh-mcp
-npm run dev  # 또는 npm start
+npm run build && npm start
 ```
 
 서버가 `http://127.0.0.1:4000`에서 실행됩니다.
 
-#### 2. JWT 토큰 발급 및 환경변수 설정
+#### 2단계: Claude Code에 MCP 서버 등록
 
-JWT 토큰을 발급받고 Shell 설정 파일에 추가합니다:
-
-**토큰 발급:**
 ```bash
-curl -X POST http://127.0.0.1:4000/auth \
-  -H "Content-Type: application/json" \
-  -d '{"token_passphrase": "your-passphrase-from-env"}'
+claude mcp add local-ssh --transport http http://127.0.0.1:4000/mcp
 ```
 
-**bash 사용자:**
+#### 3단계: 등록 확인
+
 ```bash
-nano ~/.bashrc
+claude mcp list
 ```
 
-파일 끝에 추가:
-```bash
-# SSH MCP Server Configuration (v2.0.0 - JWT)
-export MCP_JWT_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."  # 발급받은 토큰
-export MCP_SERVER_URL="http://127.0.0.1:4000"
+출력 예시:
 
-# 헬퍼 스크립트를 PATH에 추가
-export PATH="$PATH:/path/to/local-ssh-mcp/scripts"
+```
+local-ssh: http://127.0.0.1:4000/mcp (connected)
+  Tools: ssh_execute, ssh_list_credentials, ssh_session_info
 ```
 
-적용:
-```bash
-source ~/.bashrc
+#### 연결 상태 확인
+
+`/mcp` 명령으로 MCP 서버 상태를 확인할 수 있습니다:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Local-ssh MCP Server                                        │
+│                                                             │
+│ Status: ✔ connected                                         │
+│ Auth: ✘ not authenticated  ← 정상 (OAuth 미사용)            │
+│ URL: http://127.0.0.1:4000/mcp                              │
+│ Tools: 3 tools                                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**zsh 사용자:**
-```bash
-nano ~/.zshrc
+> **참고**: `Auth: ✘ not authenticated`는 정상입니다. 이 서버는 localhost 전용이므로 OAuth 인증을 사용하지 않습니다.
+
+### 방법 2: 수동 설정 (.mcp.json)
+
+`~/.claude/.mcp.json` 또는 프로젝트 루트의 `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "local-ssh": {
+      "type": "http",
+      "url": "http://127.0.0.1:4000/mcp"
+    }
+  }
+}
 ```
 
-같은 내용 추가 후:
-```bash
-source ~/.zshrc
-```
-
-#### 3. Claude Code에서 사용하기
-
-##### 방법 1: 헬퍼 스크립트 사용 (권장)
-
-헬퍼 스크립트는 자동으로 `$MCP_JWT_TOKEN`을 읽어서 인증합니다:
+### MCP 서버 관리
 
 ```bash
-# 기본 사용법
-./scripts/ssh-mcp-run.sh <HOST> <USERNAME> <COMMAND> [PORT]
+# 서버 목록
+claude mcp list
 
-# 예시: Kubernetes 파드 조회
-./scripts/ssh-mcp-run.sh k8s.example.com ubuntu "kubectl get pods"
+# 서버 제거
+claude mcp remove local-ssh
 
-# 예시: 비밀번호 인증
-./scripts/ssh-mcp-run.sh -p mypassword server.com admin "docker ps"
-
-# 예시: 커스텀 포트
-./scripts/ssh-mcp-run.sh server.com user "ls" 2222
-```
-
-##### 방법 2: 직접 curl 사용
-
-```bash
-curl -X POST http://127.0.0.1:4000/mcp/run \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_JWT_TOKEN" \
-  -d '{
-    "host": "server.example.com",
-    "username": "ubuntu",
-    "command": "kubectl get pods"
-  }'
+# 서버 재연결
+claude mcp add local-ssh --transport http http://127.0.0.1:4000/mcp
 ```
 
 ---
@@ -447,232 +256,173 @@ curl -X POST http://127.0.0.1:4000/mcp/run \
 
 ### 기본 사용법
 
-Claude Code를 실행하고 자연스럽게 요청하세요:
+Claude Code에서 자연어로 요청하면 자동으로 MCP 도구를 사용합니다:
 
-#### 시나리오 1: 명령 실행 요청
+#### 시나리오 1: 파드 상태 확인
 
 **사용자:**
+
 ```
-production.example.com 서버에 ubuntu 계정으로 접속해서
-쿠버네티스 파드 상태를 확인해줘
+my-server에서 kubectl get pods 실행해줘
 ```
 
 **Claude:**
+
 ```
 파드 상태를 확인하겠습니다.
+[ssh_execute 도구 사용: credentialId="my-server", command="kubectl get pods"]
 ```
 
-Claude가 자동으로 실행:
-```bash
-./scripts/ssh-mcp-run.sh production.example.com ubuntu "kubectl get pods"
-```
-
-결과를 받아서 분석하고 리포트 제공.
-
-#### 시나리오 2: 비밀번호 인증
+#### 시나리오 2: 자격증명 목록 조회
 
 **사용자:**
+
 ```
-legacy-server.com 서버에 admin/password123으로 접속해서
-디스크 사용량을 확인해줘
+등록된 SSH 서버 목록을 보여줘
 ```
 
 **Claude:**
-```
-디스크 사용량을 확인하겠습니다.
-```
 
-Claude가 실행:
-```bash
-./scripts/ssh-mcp-run.sh -p password123 legacy-server.com admin "df -h"
+```
+[ssh_list_credentials 도구 사용]
+
+등록된 서버 목록:
+1. my-server (server.example.com) - ubuntu
+2. dev-server (dev.example.com) - developer
 ```
 
 #### 시나리오 3: 여러 서버 확인
 
 **사용자:**
+
 ```
-web-01.example.com, web-02.example.com, web-03.example.com
-3개 서버의 uptime을 각각 확인해줘
+my-server와 dev-server의 디스크 사용량을 비교해줘
 ```
 
 **Claude:**
-Claude가 순차적으로 3개 서버에 명령을 실행하고 결과를 비교/요약합니다.
+
+```
+두 서버의 디스크 사용량을 확인하겠습니다.
+[두 서버에 df -h 실행 후 결과 비교 분석]
+```
 
 ### 고급 사용법
 
-#### 로그 분석 요청
+#### Persistent 세션 모드
 
-**사용자:**
 ```
-nginx-server의 /var/log/nginx/error.log에서
-최근 1시간 동안의 500 에러를 찾아서 분석해줘
-```
-
-**Claude:**
-```
-nginx 에러 로그를 분석하겠습니다.
+my-server에서 persistent 모드로:
+1. cd /var/log
+2. ls -la
+3. tail -n 50 syslog
 ```
 
-1. 먼저 로그 파일을 조회
-2. 500 에러 패턴을 필터링
-3. 에러 발생 빈도와 패턴 분석
-4. 가능한 원인과 해결책 제안
+Persistent 모드에서는 작업 디렉토리(cwd)가 유지됩니다.
+
+#### 로그 분석
+
+```
+dev-server의 nginx 에러 로그에서 최근 500 에러를 찾아 분석해줘
+```
 
 #### 리소스 모니터링
 
-**사용자:**
 ```
-k8s-cluster의 모든 파드 중에서
-CPU 사용률이 80% 이상인 파드를 찾아줘
+my-server의 메모리 사용량이 높은 프로세스 상위 10개를 보여줘
 ```
-
-**Claude:**
-```
-리소스 사용률을 확인하겠습니다.
-```
-
-1. `kubectl top pods` 실행
-2. CPU 사용률 파싱
-3. 80% 이상 파드 필터링
-4. 결과를 표로 정리하여 제공
-
-#### 문제 진단
-
-**사용자:**
-```
-db-server의 메모리 사용률이 높은데,
-어떤 프로세스가 메모리를 많이 쓰는지 확인해줘
-```
-
-**Claude:**
-```
-메모리 사용 현황을 분석하겠습니다.
-```
-
-1. `ps aux --sort=-%mem | head -20` 실행
-2. 메모리 사용량이 많은 프로세스 확인
-3. 프로세스별 메모리 사용량 분석
-4. 최적화 방안 제안
-
-### 복합 시나리오
-
-#### 전체 인프라 헬스 체크
-
-**사용자:**
-```
-내가 관리하는 서버 정보:
-- production.example.com (username: ubuntu, 키 인증)
-- staging.example.com (username: ubuntu, 키 인증)
-- db-server.example.com (username: postgres, 키 인증)
-
-이 3개 서버의 헬스 체크를 해줘:
-1. 디스크 사용량 (80% 이상 경고)
-2. 메모리 사용률 (90% 이상 경고)
-3. CPU 로드 (5.0 이상 경고)
-4. 시스템 업타임
-```
-
-**Claude:**
-Claude가 각 서버에 대해:
-1. `df -h` 실행 → 디스크 사용량 확인
-2. `free -h` 실행 → 메모리 사용률 확인
-3. `uptime` 실행 → CPU 로드 및 업타임 확인
-4. 모든 결과를 종합하여 표 형태로 리포트 작성
-5. 경고 임계값 초과 항목 강조
-
-#### 배포 후 검증
-
-**사용자:**
-```
-production 서버에 방금 배포한 app-service의 상태를 확인해줘:
-1. 파드가 Running 상태인지
-2. 로그에 에러가 없는지
-3. 서비스 엔드포인트가 응답하는지
-```
-
-**Claude:**
-1. `kubectl get pods -l app=app-service` 실행
-2. 파드 상태 확인 (Running인지)
-3. `kubectl logs <pod-name> --tail=50` 실행
-4. 로그에서 ERROR, FATAL 패턴 검색
-5. `curl http://service-endpoint/health` 실행
-6. 전체 검증 결과 리포트 작성
-
-#### 로그 트러블슈팅
-
-**사용자:**
-```
-api-server에서 갑자기 응답이 느려졌어.
-최근 30분 동안의 로그를 보고 원인을 찾아줘.
-```
-
-**Claude:**
-1. `journalctl -u api-server --since "30 minutes ago"` 실행
-2. 에러 메시지 패턴 검색
-3. 타임스탬프 기준으로 문제 발생 시점 특정
-4. 느려진 시점 전후 로그 비교 분석
-5. 가능한 원인 추론 (DB 연결, 메모리 부족, 네트워크 등)
-6. 해결 방안 제안
-
-### 사용 팁
-
-#### 서버 정보를 명확하게 제공
-
-❌ **나쁜 예:**
-```
-사용자: 서버 상태 확인해줘
-```
-
-✅ **좋은 예:**
-```
-사용자: production.example.com 서버에 ubuntu 계정으로 접속해서
-      kubectl get pods 명령으로 파드 상태 확인해줘
-```
-
-#### 서버 정보를 미리 알려주기
-
-대화 시작 시:
-```
-사용자: 내가 관리하는 서버 정보:
-- production.example.com (username: ubuntu, 키 인증)
-- staging.example.com (username: ubuntu, 키 인증)
-- legacy.example.com (username: admin, 비밀번호: pass123)
-
-앞으로 이 서버들에 대해 물어볼게
-```
-
-이후 간단하게:
-```
-사용자: production 서버의 파드 상태 확인해줘
-```
-
-Claude가 이전 대화 내용을 참고하여 서버 정보를 알아서 사용합니다.
-
-#### Claude에게 결과 분석 요청
-
-단순히 명령 실행만이 아니라 결과 해석도 요청:
-
-```
-사용자: production 서버의 파드 상태를 확인하고,
-      문제가 있는 파드가 있으면 알려줘. 그리고 원인을 추론해봐.
-```
-
-Claude가 결과를 분석하고:
-- 파드 상태 요약
-- CrashLoopBackOff, ImagePullBackOff 등 문제 있는 파드 식별
-- 로그 확인 필요성 제안
-- 가능한 원인 추론
 
 ---
 
-## 🔧 개발 명령어
+## 📡 MCP 프로토콜
+
+### 엔드포인트
+
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | /mcp | JSON-RPC 2.0 요청 |
+| GET | /mcp | SSE 스트림 |
+| DELETE | /mcp | 세션 종료 |
+| GET | /mcp/health | 헬스 체크 |
+
+### MCP 메소드
+
+| 메소드 | 설명 |
+|--------|------|
+| `initialize` | 클라이언트 핸드셰이크 |
+| `initialized` | 초기화 완료 알림 |
+| `ping` | 연결 확인 |
+| `tools/list` | 사용 가능한 도구 목록 |
+| `tools/call` | 도구 실행 |
+
+### 수동 테스트
 
 ```bash
-npm run build    # TypeScript 컴파일
-npm start        # 프로덕션 모드 실행
-npm run dev      # 개발 모드 실행 (ts-node, hot-reload)
-npm run watch    # TypeScript watch 모드
-npm run clean    # dist/ 폴더 삭제
+# MCP 테스트 스크립트
+./scripts/test-mcp.sh
+
+# 또는 수동으로
+curl -X POST http://127.0.0.1:4000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+```
+
+---
+
+## ⚙️ 설정 파일
+
+### credentials.json
+
+SSH 자격증명 저장 (gitignore 처리됨):
+
+```json
+{
+  "version": "1.0",
+  "credentials": [
+    {
+      "id": "server-id",
+      "name": "서버 이름",
+      "host": "hostname",
+      "port": 22,
+      "username": "user",
+      "authType": "key",
+      "privateKeyPath": "/path/to/key",
+      "passphrase": "base64-encoded"
+    }
+  ]
+}
+```
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `id` | ✅ | 고유 식별자 (소문자, 숫자, 하이픈) |
+| `name` | ✅ | 표시 이름 |
+| `host` | ✅ | 호스트명 또는 IP |
+| `port` | ✅ | SSH 포트 (기본: 22) |
+| `username` | ✅ | SSH 사용자명 |
+| `authType` | ✅ | `key` 또는 `password` |
+| `privateKeyPath` | key일 때 | SSH 키 파일 경로 |
+| `passphrase` | 선택 | 키 패스프레이즈 (base64) |
+| `password` | password일 때 | SSH 비밀번호 (base64) |
+
+### rules.json
+
+명령 필터링 규칙 (Hot-reload 지원):
+
+```json
+{
+  "allowedCommands": [
+    "kubectl",
+    "docker",
+    "ls",
+    "cat",
+    "grep"
+  ],
+  "blockedPatterns": [
+    "rm -rf",
+    "shutdown",
+    "reboot"
+  ]
+}
 ```
 
 ---
@@ -682,34 +432,47 @@ npm run clean    # dist/ 폴더 삭제
 ```
 local-ssh-mcp/
 ├── src/
-│   ├── index.ts                    # 메인 서버 엔트리포인트
+│   ├── index.ts                    # 서버 엔트리포인트
 │   ├── routes/
-│   │   ├── auth.ts                 # JWT 토큰 발급 라우트
-│   │   └── mcp.ts                  # MCP API 라우트 (health, status, run)
+│   │   ├── mcp-transport.ts        # MCP HTTP 트랜스포트
+│   │   ├── mcp-handlers.ts         # MCP 메소드 핸들러
+│   │   ├── mcp-tools.ts            # MCP 도구 구현
+│   │   └── mcp.ts                  # 헬스/상태 엔드포인트
 │   ├── services/
-│   │   └── ssh-manager.ts          # SSH 연결 및 명령 실행 관리
+│   │   ├── ssh-manager.ts          # SSH 실행
+│   │   ├── session-manager.ts      # 세션 관리
+│   │   └── credential-manager.ts   # 자격증명 관리
 │   ├── middleware/
-│   │   ├── auth.ts                 # JWT 인증 미들웨어
-│   │   └── validator.ts            # 명령 검증 미들웨어 (hot-reload)
+│   │   ├── origin-validator.ts     # Origin 검증
+│   │   └── validator.ts            # 명령 검증
 │   ├── utils/
-│   │   ├── jwt.ts                  # JWT 생성/검증 유틸리티
-│   │   └── logger.ts               # Winston 로거 설정
+│   │   ├── logger.ts               # Winston 로거
+│   │   ├── json-rpc.ts             # JSON-RPC 유틸리티
+│   │   └── base64.ts               # Base64 인코딩
 │   └── types/
-│       └── index.ts                # TypeScript 타입 정의
+│       ├── index.ts                # 레거시 타입
+│       ├── mcp.ts                  # MCP 타입
+│       └── credentials.ts          # 자격증명 타입
 ├── scripts/
-│   └── ssh-mcp-run.sh              # 헬퍼 스크립트 (JWT 자동 로드)
-├── logs/                            # 로그 파일 (자동 생성)
-│   ├── combined.log                # 전체 로그
-│   └── error.log                   # 에러 로그
-├── dist/                            # 컴파일된 JavaScript (자동 생성)
-├── .env                             # 환경변수 (직접 생성 필요, .gitignore)
-├── .env.example                     # 환경변수 템플릿
-├── rules.json                       # 명령 필터링 룰 (hot-reload)
-├── package.json                     # 의존성 관리
-├── tsconfig.json                    # TypeScript 설정
-├── CLAUDE.md                        # 프로젝트 상세 문서 (Claude Code용)
-├── CLAUDE_CODE_SETUP.md             # Claude Code 설정 가이드
-└── README.md                        # 이 문서
+│   └── test-mcp.sh                 # MCP 테스트 스크립트
+├── credentials.json                # SSH 자격증명 (gitignore)
+├── credentials.example.json        # 자격증명 예시
+├── credentials.schema.json         # JSON 스키마
+├── rules.json                      # 명령 필터링 규칙
+├── .mcp.json.example               # Claude Code 설정 예시
+└── CLAUDE.md                       # Claude Code 가이드
+```
+
+---
+
+## 🔧 개발 명령어
+
+```bash
+npm run build    # TypeScript 컴파일
+npm start        # 프로덕션 실행
+npm run dev      # 개발 모드 (ts-node)
+npm run watch    # TypeScript watch 모드
+npm run clean    # dist/ 삭제
 ```
 
 ---
@@ -717,149 +480,104 @@ local-ssh-mcp/
 ## 🔒 보안 권장사항
 
 ### 1. SSH 키 권한 설정
+
 ```bash
 chmod 600 ~/.ssh/id_rsa
 ```
 
-### 2. SSH 키 Passphrase 사용
-```bash
-# 새로운 SSH 키 생성 (passphrase 설정)
-ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
+### 2. credentials.json 권한 설정
 
-# 기존 SSH 키에 passphrase 추가
-ssh-keygen -p -f ~/.ssh/id_rsa
+```bash
+chmod 600 credentials.json
 ```
 
-### 3. 강력한 인증 정보 생성
-```bash
-# TOKEN_PASSPHRASE 생성
-openssl rand -hex 32
+### 3. 프로덕션 환경
 
-# JWT_SECRET_KEY 생성
-openssl rand -hex 64
-```
-
-### 4. `.env` 파일 권한 설정
-```bash
-chmod 600 .env
-```
-
-### 5. 프로덕션 환경 설정
 ```env
 NODE_ENV=production
 LOG_LEVEL=warn
-```
-
-### 6. 방화벽 설정 (선택사항)
-```bash
-# 127.0.0.1에서만 접근 허용
-sudo ufw allow from 127.0.0.1 to any port 4000
-```
-
----
-
-## 📝 로그 확인
-
-로그 파일 위치:
-- `logs/combined.log` - 전체 로그 (INFO, WARN, ERROR)
-- `logs/error.log` - 에러 로그만 (ERROR)
-
-실시간 로그 모니터링:
-```bash
-tail -f logs/combined.log
-```
-
-로그 레벨 변경 (`.env`):
-```env
-LOG_LEVEL=debug  # error, warn, info, debug
 ```
 
 ---
 
 ## 🐛 문제 해결
 
-### JWT 토큰이 만료된 경우
+### MCP 서버 연결 실패
 
-에러: `"JWT token expired. Please obtain a new token..."`
+1. 서버가 실행 중인지 확인:
 
-해결:
 ```bash
-curl -X POST http://127.0.0.1:4000/auth \
-  -H "Content-Type: application/json" \
-  -d '{"token_passphrase": "your-passphrase"}'
-
-# 응답의 token 값을 복사하여 환경변수 업데이트
-export MCP_JWT_TOKEN="new-token-here"
-
-# ~/.zshrc 또는 ~/.bashrc에도 업데이트
-nano ~/.zshrc  # 또는 ~/.bashrc
-# MCP_JWT_TOKEN 값 변경 후 저장
-source ~/.zshrc
+curl http://127.0.0.1:4000/mcp/health
 ```
 
-### SSH 연결 실패
+2. 서버 재시작:
 
-1. SSH 키 권한 확인:
 ```bash
-ls -la ~/.ssh/id_rsa  # -rw------- (600) 이어야 함
-chmod 600 ~/.ssh/id_rsa  # 권한 수정
+npm run build && npm start
 ```
 
-2. 수동 SSH 연결 테스트:
+3. Claude Code에서 재연결:
+
 ```bash
-ssh -i ~/.ssh/id_rsa username@server.com
+claude mcp remove local-ssh
+claude mcp add local-ssh --transport http http://127.0.0.1:4000/mcp
 ```
 
-3. 서버 로그 확인:
+### "Credential not found" 오류
+
+`credentials.json`에 해당 `id`가 있는지 확인:
+
 ```bash
-tail -f logs/combined.log
+cat credentials.json | jq '.credentials[].id'
 ```
 
-### 명령이 차단된 경우
+### "Command validation failed" 오류
 
-에러: `"Command validation failed: Command does not match any allowed pattern"`
+`rules.json`에서 명령어를 허용 목록에 추가:
 
-해결: `rules.json` 파일에서 허용 명령 추가:
 ```json
 {
   "allowedCommands": [
-    "kubectl",
-    "docker",
     "your-command-here"
-  ],
-  "blockedPatterns": [
-    "rm -rf",
-    "shutdown"
   ]
 }
 ```
 
-파일 저장 시 자동으로 반영됨 (서버 재시작 불필요)
+파일 저장 시 자동 반영 (서버 재시작 불필요)
 
-### 헬퍼 스크립트를 찾지 못하는 경우
+### SSH 연결 실패
+
+1. 수동 SSH 테스트:
 
 ```bash
-# 스크립트가 PATH에 있는지 확인
-which ssh-mcp-run.sh
+ssh -i ~/.ssh/id_rsa user@host
+```
 
-# 없으면 PATH에 추가
-export PATH="$PATH:/path/to/local-ssh-mcp/scripts"
+2. 키 파일 경로 확인 (`credentials.json`)
 
-# 또는 절대 경로로 실행
-/path/to/local-ssh-mcp/scripts/ssh-mcp-run.sh server.com user "ls"
+3. 디버그 로그 활성화:
+
+```bash
+LOG_LEVEL=debug npm run dev
 ```
 
 ---
 
-<!-- ## 🤝 기여하기
+## 📝 로그 확인
 
-이슈 리포트 및 풀 리퀘스트를 환영합니다!
+```bash
+# 실시간 로그
+tail -f logs/combined.log
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request -->
+# 에러 로그만
+tail -f logs/error.log
+```
+
+로그 레벨 변경 (`.env`):
+
+```env
+LOG_LEVEL=debug  # error, warn, info, debug
+```
 
 ---
 
