@@ -36,6 +36,7 @@ export interface SSHConfig {
   username: string;
   privateKeyPath?: string; // 키 기반 인증 시 사용
   password?: string; // 비밀번호 기반 인증 시 사용
+  passphrase?: string; // SSH 키 패스프레이즈 (직접 전달)
 }
 
 // 명령 검증 결과

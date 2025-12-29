@@ -200,8 +200,9 @@ export class SessionManager {
     try {
       logger.info(`[SessionManager] Executing command in session ${sessionId}: ${command}`);
 
-      // cwd를 유지하면서 명령 실행
-      const fullCommand = `cd ${session.cwd} && ${command}`;
+      // cwd를 유지하면서 명령 실행 (쉘 이스케이프로 명령 주입 방지)
+      const escapedCwd = session.cwd.replace(/'/g, "'\\''");
+      const fullCommand = `cd '${escapedCwd}' && ${command}`;
 
       const result = await session.ssh.execCommand(fullCommand, {
         execOptions: {

@@ -3,6 +3,7 @@
  */
 
 import fs from 'fs';
+import { NodeSSH } from 'node-ssh';
 import {
   MCPTool,
   MCPToolCallResult,
@@ -12,7 +13,6 @@ import {
 } from '../types/mcp';
 import { SSHConfig } from '../types';
 import { getCredentialManager } from '../services/credential-manager';
-import { getSSHManager } from '../services/ssh-manager';
 import { getSessionManager } from '../services/session-manager';
 import { validateCommand } from '../middleware/validator';
 import logger from '../utils/logger';
@@ -83,20 +83,59 @@ export function getMCPTools(): MCPTool[] {
 // Tool 실행
 // ============================================
 
+/**
+ * SSH 실행 인자 검증
+ */
+function validateSSHExecuteArgs(args: Record<string, unknown>): SSHExecuteArguments | null {
+  if (typeof args.credentialId !== 'string' || !args.credentialId) {
+    return null;
+  }
+  if (typeof args.command !== 'string' || !args.command) {
+    return null;
+  }
+
+  const sessionMode = args.sessionMode;
+  if (sessionMode !== undefined && sessionMode !== 'ephemeral' && sessionMode !== 'persistent') {
+    return null;
+  }
+
+  return {
+    credentialId: args.credentialId,
+    command: args.command,
+    sessionMode: (sessionMode as 'ephemeral' | 'persistent') || 'ephemeral',
+  };
+}
+
 export async function executeToolCall(
   name: string,
   args: Record<string, unknown>,
   session: MCPSession
 ): Promise<MCPToolCallResult> {
   switch (name) {
-    case 'ssh_execute':
-      return executeSSHCommand(args as unknown as SSHExecuteArguments, session);
+    case 'ssh_execute': {
+      const validatedArgs = validateSSHExecuteArgs(args);
+      if (!validatedArgs) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Invalid arguments: credentialId (string) and command (string) are required',
+              code: JSON_RPC_ERROR_CODES.INVALID_PARAMS,
+            }),
+          }],
+          isError: true,
+        };
+      }
+      return executeSSHCommand(validatedArgs, session);
+    }
 
     case 'ssh_list_credentials':
       return listCredentials();
 
-    case 'ssh_session_info':
-      return getSessionInfo(args.credentialId as string | undefined);
+    case 'ssh_session_info': {
+      const credentialId = typeof args.credentialId === 'string' ? args.credentialId : undefined;
+      return getSessionInfo(credentialId);
+    }
 
     default:
       throw new Error(`Unknown tool: ${name}`);
@@ -241,32 +280,45 @@ async function executeEphemeralCommand(
 
     sshConfig.privateKeyPath = credential.privateKeyPath;
 
-    // 패스프레이즈가 있으면 환경변수로 전달
+    // 패스프레이즈가 있으면 SSH config에 직접 전달 (환경변수 사용 안함)
     const passphrase = credManager.getDecodedPassphrase(credentialId);
     if (passphrase) {
-      process.env.SSH_PASSPHRASE = passphrase;
+      sshConfig.passphrase = passphrase;
     }
   }
 
-  const sshManager = getSSHManager();
+  // 동시성 문제 방지: 싱글톤 대신 새 인스턴스 생성
+  const ssh = new NodeSSH();
 
-  await sshManager.connect(sshConfig);
-  const result = await sshManager.executeCommand(command);
-  await sshManager.disconnect();
+  try {
+    await ssh.connect({
+      host: sshConfig.host,
+      port: sshConfig.port,
+      username: sshConfig.username,
+      password: sshConfig.password,
+      privateKeyPath: sshConfig.privateKeyPath,
+      passphrase: sshConfig.passphrase,
+      readyTimeout: 10000,
+    });
 
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.exitCode,
-        credentialId,
-        host,
-        sessionMode: 'ephemeral',
-      }),
-    }],
-  };
+    const result = await ssh.execCommand(command, { cwd: '/tmp' });
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exitCode: result.code ?? 0,
+          credentialId,
+          host,
+          sessionMode: 'ephemeral',
+        }),
+      }],
+    };
+  } finally {
+    ssh.dispose();
+  }
 }
 
 /**

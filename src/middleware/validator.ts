@@ -14,16 +14,18 @@ interface Rules {
 }
 
 // 현재 로드된 규칙 (메모리 캐시)
-let currentRules: Rules = {
-  allowedCommands: [],
-  blockedPatterns: []
-};
+let currentRules: Rules | null = null;
 
 /**
  * rules.json 파일에서 규칙 로드
+ * @throws 초기 로드 실패 시 에러 발생 (서버 시작 차단)
  */
 function loadRules(): void {
   try {
+    if (!fs.existsSync(RULES_FILE_PATH)) {
+      throw new Error(`Rules file not found: ${RULES_FILE_PATH}`);
+    }
+
     const fileContent = fs.readFileSync(RULES_FILE_PATH, 'utf-8');
     const rules = JSON.parse(fileContent) as Rules;
 
@@ -35,14 +37,18 @@ function loadRules(): void {
     currentRules = rules;
     logger.info(`Rules loaded successfully: ${rules.allowedCommands.length} allowed commands, ${rules.blockedPatterns.length} blocked patterns`);
   } catch (error) {
-    logger.error(`Failed to load rules from ${RULES_FILE_PATH}: ${error}`);
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
-    // 실패 시 기본 규칙 사용
-    currentRules = {
-      allowedCommands: ['kubectl', 'docker', 'ls', 'ps', 'top'],
-      blockedPatterns: ['rm -rf', 'shutdown', 'reboot']
-    };
-    logger.warn('Using fallback rules due to load failure');
+    // 초기 로드 실패 시 서버 시작 차단 (fail-fast)
+    if (currentRules === null) {
+      logger.error(`[CRITICAL] Failed to load security rules: ${errorMessage}`);
+      logger.error('[CRITICAL] Server cannot start without valid security rules. Fix rules.json and restart.');
+      throw new Error(`Security rules load failed: ${errorMessage}`);
+    }
+
+    // 핫 리로드 실패 시 기존 규칙 유지하고 경고
+    logger.error(`[Security] Failed to reload rules: ${errorMessage}`);
+    logger.warn('[Security] Keeping previous rules. Fix rules.json to apply changes.');
   }
 }
 
@@ -73,6 +79,15 @@ watchRulesFile();
  * @returns 검증 결과
  */
 export function validateCommand(command: string): ValidationResult {
+  // 규칙이 로드되지 않은 경우 (서버 시작 시 실패했어야 함)
+  if (!currentRules) {
+    logger.error('[Security] Rules not loaded - rejecting all commands');
+    return {
+      valid: false,
+      reason: 'Security rules not available'
+    };
+  }
+
   if (!command || command.trim().length === 0) {
     return {
       valid: false,
