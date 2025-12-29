@@ -58,10 +58,13 @@ export class SSHManager {
         // 키 기반 인증
         sshConfig.privateKeyPath = config.privateKeyPath;
 
-        // passphrase가 설정되어 있으면 추가
-        if (this.sshPassphrase && this.sshPassphrase.length > 0) {
+        // passphrase가 config에 직접 전달되었으면 사용, 아니면 환경변수 fallback
+        if (config.passphrase) {
+          sshConfig.passphrase = config.passphrase;
+          logger.debug('Using SSH key with passphrase (from config)');
+        } else if (this.sshPassphrase && this.sshPassphrase.length > 0) {
           sshConfig.passphrase = this.sshPassphrase;
-          logger.debug('Using SSH key with passphrase');
+          logger.debug('Using SSH key with passphrase (from env)');
         } else {
           logger.debug('Using SSH key without passphrase');
         }

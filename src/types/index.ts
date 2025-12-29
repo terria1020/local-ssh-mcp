@@ -36,6 +36,7 @@ export interface SSHConfig {
   username: string;
   privateKeyPath?: string; // 키 기반 인증 시 사용
   password?: string; // 비밀번호 기반 인증 시 사용
+  passphrase?: string; // SSH 키 패스프레이즈 (직접 전달)
 }
 
 // 명령 검증 결과
@@ -44,22 +45,8 @@ export interface ValidationResult {
   reason?: string;
 }
 
-// JWT 페이로드 인터페이스
-export interface JWTPayload {
-  issuer: string;
-  iat: number;  // issued at
-  exp: number;  // expiration
-}
+// v3.0.0: JWT 관련 타입 제거됨
+// JWTPayload, AuthRequest, AuthResponse는 더 이상 사용하지 않음
 
-// /auth 엔드포인트 요청
-export interface AuthRequest {
-  token_passphrase: string;
-}
-
-// /auth 엔드포인트 응답
-export interface AuthResponse {
-  jwt: string;
-  message: string;
-  expiresIn: string;
-  expiresAt: string;
-}
+// MCP 프로토콜 타입 re-export
+export * from './mcp';

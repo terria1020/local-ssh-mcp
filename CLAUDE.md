@@ -4,19 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Local SSH MCP Server** - A secure localhost-only proxy server that enables Claude Code to execute SSH commands on remote servers via JSON API, keeping SSH credentials local and never exposing them to Claude.
+**Local SSH MCP Server** - A secure localhost-only MCP (Model Context Protocol) server that enables Claude Code to execute SSH commands on remote servers, keeping SSH credentials local and never exposing them to Claude.
 
-**Version**: 2.0.0 (JWT-based authentication)
+**Version**: 3.0.0 (MCP Protocol with Streamable HTTP/SSE)
 
-**Core Architecture**: Express.js REST API with layered middleware (auth → validation → SSH execution)
+**Core Architecture**: Express.js MCP server with JSON-RPC 2.0 transport over HTTP/SSE
 
 **Security Model**:
 - Localhost-only binding (127.0.0.1:4000)
-- JWT authentication with 30-minute expiry (HS256 algorithm)
-- Token issuance via passphrase validation
-- Issuer verification and signature validation
+- Origin header validation (DNS rebinding protection)
+- File-based multi-credential management (`credentials.json`)
 - Command whitelist/blacklist filtering (hot-reloadable via `rules.json`)
-- Ephemeral SSH connections (no persistent state, each request creates fresh connection)
+- Session-based SSH connections (ephemeral or persistent modes)
 
 ## Quick Start
 
@@ -33,47 +32,56 @@ npm run clean        # Remove dist/ directory
 ### Testing the Server
 
 ```bash
-# Health check (no auth required)
+# Health check
 curl http://127.0.0.1:4000/mcp/health
 
-# Step 1: Obtain JWT token (required first)
-curl -X POST http://127.0.0.1:4000/auth \
+# MCP test script (initialize → tools/list → ping)
+./scripts/test-mcp.sh
+
+# Manual MCP initialize
+curl -X POST http://127.0.0.1:4000/mcp \
   -H "Content-Type: application/json" \
-  -d '{"token_passphrase": "your-passphrase-from-env"}'
-
-# Step 2: Export JWT token (valid for 30 minutes)
-export MCP_JWT_TOKEN="your-jwt-token-from-step-1"
-
-# Step 3: Execute command with JWT
-curl -X POST http://127.0.0.1:4000/mcp/run \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_JWT_TOKEN" \
-  -d '{"host": "server.com", "username": "user", "command": "ls"}'
-
-# Helper script (recommended - uses MCP_JWT_TOKEN from environment)
-./scripts/ssh-mcp-run.sh server.com user "kubectl get pods"
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
 ```
+
+### Setting Up Credentials
+
+1. Copy example file:
+   ```bash
+   cp credentials.example.json credentials.json
+   ```
+
+2. Edit `credentials.json` with your SSH credentials:
+   ```json
+   {
+     "version": "1.0",
+     "credentials": [
+       {
+         "id": "my-server",
+         "name": "My Server",
+         "host": "server.example.com",
+         "port": 22,
+         "username": "admin",
+         "authType": "key",
+         "privateKeyPath": "/Users/you/.ssh/id_rsa"
+       }
+     ]
+   }
+   ```
+
+3. For password auth, base64 encode the password:
+   ```bash
+   echo -n "your-password" | base64
+   ```
 
 ## Architecture Deep Dive
 
-### Request Flow
+### Request Flow (v3.0.0 - MCP Protocol)
 
-**Authentication Flow (v2.0.0 - JWT):**
 ```
-1. Client sends token_passphrase to POST /auth
+Claude Code
     ↓
-2. Server validates passphrase against TOKEN_PASSPHRASE
-    ↓
-3. Server generates JWT (30 min expiry, signed with JWT_SECRET_KEY)
-    ↓
-4. Server returns JWT with usage instructions
-    ↓
-5. Client stores JWT in environment (MCP_JWT_TOKEN)
-```
-
-**API Request Flow:**
-```
-Client Request
+JSON-RPC 2.0 Request
     ↓
 Express Global Middleware
     ├─ Helmet (security headers)
@@ -81,106 +89,103 @@ Express Global Middleware
     ├─ Body Parser (10kb limit)
     └─ Request Logger
     ↓
-Route: POST /mcp/run
+POST /mcp
     ↓
-Route-Specific Middleware Chain
-    ├─ authenticateToken (src/middleware/auth.ts)
-    │   ├─ Extracts JWT from Authorization header
-    │   ├─ Verifies signature with JWT_SECRET_KEY
-    │   ├─ Checks issuer matches JWT_ISSUER
-    │   ├─ Validates expiration time (30 min)
-    │   └─ Returns 401 with specific error if validation fails:
-    │       • "JWT token expired" → token expired
-    │       • "JWT issuer mismatch" → wrong issuer
-    │       • "Invalid JWT token" → signature invalid/tampered
-    ├─ validateCommandMiddleware (src/middleware/validator.ts)
-    │   ├─ Loads rules from rules.json (hot-reloadable)
-    │   ├─ Checks blockedPatterns (substring match)
-    │   └─ Checks allowedCommands (prefix match)
+Origin Validation (src/middleware/origin-validator.ts)
+    ├─ Checks Origin header
+    └─ Allows localhost, 127.0.0.1, ::1, or no Origin (CLI)
     ↓
-Route Handler (src/routes/mcp.ts)
-    ├─ Extract params: {host, username, command, port, password}
-    ├─ Call SSHManager.runCommand()
-    │   ├─ Create fresh SSH connection (10s timeout)
-    │   ├─ Execute command in /tmp directory
-    │   ├─ Capture stdout/stderr/exitCode
-    │   └─ Disconnect immediately
-    └─ Return MCPResponse JSON
+MCP Transport (src/routes/mcp-transport.ts)
+    ├─ Session management (Mcp-Session-Id header)
+    ├─ JSON-RPC parsing and validation
+    └─ Method routing
+    ↓
+MCP Handlers (src/routes/mcp-handlers.ts)
+    ├─ initialize → Session setup
+    ├─ tools/list → Return tool definitions
+    └─ tools/call → Execute SSH commands
+    ↓
+Tool Execution (src/routes/mcp-tools.ts)
+    ├─ ssh_execute → Run SSH command
+    ├─ ssh_list_credentials → List available servers
+    └─ ssh_session_info → Get session status
 ```
 
 ### Key Components
 
 | File | Purpose | Key Details |
 |------|---------|-------------|
-| `src/index.ts` | Express server setup | Binds to 127.0.0.1 only, validates JWT env vars on startup, graceful shutdown handling |
-| `src/routes/auth.ts` | JWT token issuance | `POST /auth` with token_passphrase, returns 30-min JWT with usage instructions |
-| `src/routes/mcp.ts` | API endpoints | `/health` (no auth), `/status` (auth required), `/run` (auth + validation) |
-| `src/middleware/auth.ts` | JWT authentication | Verifies JWT signature (HS256), issuer, and expiration; returns specific error types |
-| `src/middleware/validator.ts` | Command filtering | Loads `rules.json`, watches for file changes with `fs.watch()`, fallback rules on failure |
-| `src/services/ssh-manager.ts` | SSH execution | Singleton pattern, ephemeral connections, dual auth (key/password), 10s connection timeout |
-| `src/utils/jwt.ts` | JWT utilities | `generateToken()`, `verifyToken()`, `getTokenExpiration()` with typed error responses |
-| `src/utils/logger.ts` | Winston logging | Console + file transports, 5MB rotation, 5 files retained |
-| `src/types/index.ts` | TypeScript definitions | `MCPRunRequest`, `SSHCommandResult`, `MCPResponse`, `JWTPayload`, `AuthRequest/Response` |
-| `rules.json` | Security rules | Whitelist/blacklist, hot-reloadable without server restart |
-| `scripts/ssh-mcp-run.sh` | CLI helper | Bash wrapper for curl, auto-loads `MCP_JWT_TOKEN`, colored output, jq formatting |
+| `src/index.ts` | Express server setup | Binds to 127.0.0.1, initializes CredentialManager, graceful shutdown |
+| `src/routes/mcp-transport.ts` | MCP HTTP transport | POST/GET/DELETE /mcp endpoints, session management, JSON-RPC handling |
+| `src/routes/mcp-handlers.ts` | MCP method handlers | initialize, initialized, ping, tools/list, tools/call |
+| `src/routes/mcp-tools.ts` | Tool implementations | ssh_execute, ssh_list_credentials, ssh_session_info |
+| `src/middleware/origin-validator.ts` | DNS rebinding protection | Origin header validation |
+| `src/middleware/validator.ts` | Command filtering | Loads `rules.json`, hot-reloadable |
+| `src/services/credential-manager.ts` | Credential storage | File-based, hot-reload, base64 password/passphrase |
+| `src/services/session-manager.ts` | SSH session pooling | Persistent connections, cwd tracking, 5-min timeout |
+| `src/services/ssh-manager.ts` | SSH execution | Ephemeral connections, dual auth support |
+| `src/types/mcp.ts` | MCP type definitions | JSON-RPC, MCP protocol, SSH types |
+| `src/types/credentials.ts` | Credential types | SSHCredential, SafeCredentialInfo |
+| `src/utils/json-rpc.ts` | JSON-RPC utilities | Parsing, validation, response builders |
+| `src/utils/base64.ts` | Encoding utilities | Base64 encode/decode |
+| `rules.json` | Security rules | Whitelist/blacklist, hot-reloadable |
+| `credentials.json` | SSH credentials | Multi-credential storage (gitignored) |
 
-### SSH Connection Management
+### SSH Connection Modes
 
-**Design: Ephemeral connections (no pooling)**
-- Each API request creates a fresh SSH connection
+**Ephemeral Mode** (default):
+- Each command creates a fresh SSH connection
 - Connection lifecycle: connect → execute → disconnect
-- No session state persists between requests
-- Commands like `cd` don't affect subsequent requests
+- No state persists between commands
+- Best for: one-off commands, different servers
 
-**Authentication Priority**:
-1. Password from request body (if provided)
-2. SSH key from `SSH_KEY_PATH` environment variable (fallback)
+**Persistent Mode**:
+- SSH connection maintained across commands
+- Current working directory (cwd) tracked
+- 5-minute timeout, max 5 commands per session
+- Best for: cd-based workflows, interactive sessions
 
-**Key Authentication** (recommended):
-```env
-SSH_KEY_PATH=/Users/you/.ssh/id_rsa
-SSH_PASSPHRASE=your-passphrase  # optional, for encrypted keys
-```
+### MCP Protocol
 
-**Password Authentication**:
-```json
-{
-  "host": "server.com",
-  "username": "user",
-  "password": "plaintext-password",  // only over localhost
-  "command": "ls"
-}
-```
+**Endpoints**:
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | /mcp | JSON-RPC requests |
+| GET | /mcp | SSE stream (notifications) |
+| DELETE | /mcp | Close session |
 
-**Command Execution Details**:
-- Working directory: `/tmp` (hardcoded for security)
-- Environment: `LANG=en_US.UTF-8`, `LC_ALL=en_US.UTF-8`
-- PTY: Disabled (`pty: false`) for clean output separation
-- Exit codes: Preserved in response (non-zero exits return HTTP 200, not 500)
+**MCP Methods**:
+- `initialize` - Client handshake, returns capabilities
+- `initialized` - Client confirms initialization (notification)
+- `ping` - Connection check
+- `tools/list` - Get available tools
+- `tools/call` - Execute a tool
+
+**Available Tools**:
+1. `ssh_execute` - Execute SSH command
+   - `credentialId` (required): ID from credentials.json
+   - `command` (required): Command to run
+   - `sessionMode` (optional): "ephemeral" or "persistent"
+
+2. `ssh_list_credentials` - List available credentials
+   - Returns safe info (no passwords/keys)
+
+3. `ssh_session_info` - Get SSH session status
+   - `credentialId` (optional): Filter by credential
 
 ### Security Validation
 
-**Five Layers of Security (v2.0.0)**:
+**Four Layers of Security (v3.0.0)**:
 
 1. **Network Isolation**
    - Server binds to `127.0.0.1:4000` only
-   - CORS restricted to `http://localhost` and `http://127.0.0.1`
+   - CORS restricted to localhost origins
 
-2. **Token Issuance Control**
-   - JWT tokens issued only after passphrase validation
-   - Passphrase stored in `TOKEN_PASSPHRASE` environment variable
-   - Never stored in zshrc (only the issued JWT is stored)
+2. **Origin Validation** (src/middleware/origin-validator.ts)
+   - DNS rebinding attack protection
+   - Allowed: `http://localhost`, `http://127.0.0.1`, `::1`, no Origin
 
-3. **JWT Authentication** (src/middleware/auth.ts)
-   - JWT signature verification using `JWT_SECRET_KEY`
-   - Issuer validation against `JWT_ISSUER`
-   - Expiration check (30-minute validity)
-   - Returns 401 with specific error messages:
-     - Token expired: "JWT token expired. Please obtain a new token..."
-     - Issuer mismatch: "JWT issuer mismatch. Token may be from unauthorized source"
-     - Invalid signature: "Invalid JWT token" (tampered or malformed)
-
-4. **Command Validation** (src/middleware/validator.ts:75-110)
+3. **Command Validation** (src/middleware/validator.ts)
    ```typescript
    // Validation order:
    1. Empty command → REJECT
@@ -189,13 +194,49 @@ SSH_PASSPHRASE=your-passphrase  # optional, for encrypted keys
    4. No whitelist match → REJECT
    ```
 
-   **Rules are hot-reloadable**: Edit `rules.json` → saved → auto-reloaded (fs.watch)
+4. **Credential Protection**
+   - Credentials stored locally in `credentials.json`
+   - Passwords/passphrases base64 encoded
+   - Never transmitted to Claude
+   - `credentials.json` in `.gitignore`
 
-5. **SSH Credential Protection**
-   - SSH keys never transmitted over network
-   - Key path stored in `.env` only
-   - Passwords only sent over localhost
-   - Working directory restricted to `/tmp`
+## Configuration
+
+### Credentials File
+
+**File**: `credentials.json` (project root, gitignored)
+
+**Schema**: `credentials.schema.json`
+
+**Example**:
+```json
+{
+  "version": "1.0",
+  "credentials": [
+    {
+      "id": "prod-server",
+      "name": "Production Server",
+      "host": "prod.example.com",
+      "port": 22,
+      "username": "admin",
+      "authType": "key",
+      "privateKeyPath": "/Users/you/.ssh/id_rsa",
+      "passphrase": "base64-encoded-passphrase"
+    },
+    {
+      "id": "dev-server",
+      "name": "Dev Server",
+      "host": "dev.example.com",
+      "port": 22,
+      "username": "developer",
+      "authType": "password",
+      "password": "base64-encoded-password"
+    }
+  ]
+}
+```
+
+**Hot-Reload**: Credentials file is watched for changes and auto-reloaded.
 
 ### Rules Configuration
 
@@ -209,330 +250,178 @@ SSH_PASSPHRASE=your-passphrase  # optional, for encrypted keys
 }
 ```
 
-**How Validation Works**:
-- `allowedCommands`: Prefix matching (e.g., `"kubectl"` allows `kubectl get pods`)
-- `blockedPatterns`: Substring matching (e.g., `"rm -rf"` blocks `rm -rf /`)
-- Blacklist takes priority over whitelist
+**Hot-Reload**: Edit and save → auto-reloaded without restart.
 
-**Hot-Reload**: File watcher (src/middleware/validator.ts:52-64) detects changes and reloads rules automatically. Check logs for confirmation:
+### Environment Variables
+
+- `PORT`: Server port (default: 4000)
+- `LOG_LEVEL`: Logging level (default: info)
+- `SSH_KEY_PATH`: Legacy - use credentials.json instead
+- `SSH_PASSPHRASE`: Legacy - use credentials.json instead
+- `SESSION_TIMEOUT`: MCP session timeout in ms (default: 300000)
+
+## Claude Code Integration
+
+### Method 1: Direct HTTP Requests
+
+Claude Code can call the MCP server directly:
+
+```bash
+# Initialize session
+curl -X POST http://127.0.0.1:4000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}'
+
+# List credentials
+curl -X POST http://127.0.0.1:4000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ssh_list_credentials","arguments":{}}}'
+
+# Execute SSH command
+curl -X POST http://127.0.0.1:4000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ssh_execute","arguments":{"credentialId":"my-server","command":"ls -la"}}}'
 ```
-Rules file changed, reloading...
-Rules loaded successfully: 14 allowed commands, 23 blocked patterns
+
+### Method 2: MCP Client Configuration
+
+Add to `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "local-ssh": {
+      "command": "node",
+      "args": ["/path/to/local-ssh-mcp/dist/index.js"],
+      "env": {
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}
 ```
 
-**Fallback Rules**: If `rules.json` fails to load, safe defaults are applied (src/middleware/validator.ts:41-45).
-
-## Important Constraints and Gotchas
+## Important Constraints
 
 ### 1. TypeScript Compilation Required
 - Source: `src/` directory
 - Compiled: `dist/` directory
-- `npm start` runs `dist/index.js`, NOT `src/index.ts`
-- Use `npm run dev` for development (uses ts-node)
+- `npm start` runs `dist/index.js`
+- Use `npm run dev` for development
 
-### 2. Rules File Path Resolution
-- Path: `__dirname + '../../rules.json'`
-- `__dirname` in compiled code is `dist/middleware/`, not `src/middleware/`
-- Rules file must be at project root, not in `src/` or `dist/`
+### 2. Credential ID Format
+- Must be lowercase alphanumeric with hyphens
+- Pattern: `^[a-z0-9-]+$`
+- Examples: `my-server`, `prod-k8s`, `dev-1`
 
-### 3. No Persistent SSH Sessions
-- Each request creates a new SSH connection
-- Session-based commands (`cd`, `export`) don't persist
-- Use absolute paths or chain commands: `cd /app && ls` (single request)
+### 3. Base64 Encoding for Secrets
+- Passwords and passphrases must be base64 encoded
+- Encode: `echo -n "secret" | base64`
+- Decode: `echo "c2VjcmV0" | base64 -d`
 
-### 4. Exit Codes vs HTTP Status
-- Command failure (exit code != 0) → HTTP 200 with `exitCode` in JSON
-- SSH connection failure → HTTP 500
-- Auth failure → HTTP 401
-- Validation failure → HTTP 403
-- Always check `result.exitCode` for command success
+### 4. Session State
+- Ephemeral mode: No state persists
+- Persistent mode: cwd tracked, 5-min timeout
+- Session ends after 5 commands in persistent mode
 
-### 5. Password Security
-- Passwords transmitted as plaintext JSON over localhost
-- Not exposed to network but visible in request bodies
-- Logs intentionally avoid logging passwords (src/routes/mcp.ts:33)
-- Production: Use SSH keys instead
+### 5. Working Directory
+- Default: `/tmp` for all commands
+- Use `cd /path && command` for other directories
+- Persistent mode tracks cwd across commands
 
-### 6. Environment Variables (v2.0.0 - JWT)
-- `.env` file must be at project root
-- `dotenv.config()` called at startup (src/index.ts:10)
-- **Required**: `TOKEN_PASSPHRASE`, `JWT_SECRET_KEY`, `JWT_ISSUER`
-- **Optional**: `SSH_KEY_PATH`, `SSH_PASSPHRASE`, `PORT`, `LOG_LEVEL`
-- **Important**: Never store `TOKEN_PASSPHRASE` in zshrc - only store issued JWT tokens
+## File Structure (v3.0.0)
 
-### 7. Logging Behavior
-- Console + file transports (both active simultaneously)
-- Files: `logs/combined.log`, `logs/error.log`
-- Auto log level: `debug` in non-production, `info` in production
-- 5MB rotation, 5 files retained
+```
+src/
+├── index.ts                    # Server entry point
+├── routes/
+│   ├── mcp-transport.ts        # MCP HTTP transport
+│   ├── mcp-handlers.ts         # MCP method handlers
+│   ├── mcp-tools.ts            # Tool implementations
+│   └── mcp.ts                  # Legacy health/status endpoints
+├── middleware/
+│   ├── origin-validator.ts     # DNS rebinding protection
+│   └── validator.ts            # Command validation
+├── services/
+│   ├── ssh-manager.ts          # SSH execution
+│   ├── session-manager.ts      # Session pooling
+│   └── credential-manager.ts   # Credential storage
+├── utils/
+│   ├── logger.ts               # Winston logging
+│   ├── json-rpc.ts             # JSON-RPC utilities
+│   └── base64.ts               # Encoding utilities
+└── types/
+    ├── index.ts                # Legacy types
+    ├── mcp.ts                  # MCP protocol types
+    └── credentials.ts          # Credential types
 
-### 8. Command Whitelist is Prefix-Based
-- `"kubectl"` in whitelist allows ALL kubectl commands
-- To restrict, use more specific prefixes: `["kubectl get", "kubectl describe"]`
-- Or rely on blocklist to prevent dangerous operations
-
-### 9. File Watcher Quirks
-- `fs.watch()` may fire multiple events for single file edit
-- Rules reload is idempotent (safe to reload multiple times)
-- Watcher can fail silently (error logged but server continues)
-- Always check logs to confirm rules reloaded
-
-### 10. Working Directory Restriction
-- All commands execute in `/tmp` (src/services/ssh-manager.ts:91)
-- Security choice: prevents accidental operations in sensitive directories
-- Use absolute paths for files outside `/tmp`: `cat /var/log/nginx/access.log`
-
-## Common Operations
-
-### Adding an Allowed Command
-
-Edit `rules.json` (no server restart needed):
-```json
-{
-  "allowedCommands": [
-    "kubectl",
-    "docker",
-    "systemctl status"  // Add new command
-  ]
-}
+credentials.json                # SSH credentials (gitignored)
+credentials.example.json        # Example credentials
+credentials.schema.json         # JSON Schema
+rules.json                      # Command validation rules
 ```
 
-Watch logs for confirmation:
-```
-Rules file changed, reloading...
-Rules loaded successfully: 15 allowed commands, 23 blocked patterns
-```
+## Debugging
 
-### Blocking a Dangerous Pattern
-
-Edit `rules.json`:
-```json
-{
-  "blockedPatterns": [
-    "rm -rf",
-    "curl | bash",
-    "your-new-pattern"  // Add emergency block
-  ]
-}
-```
-
-Changes apply immediately to new requests.
-
-### Changing Authentication Method
-
-**Switch to password auth**:
-1. Remove or comment out `SSH_KEY_PATH` in `.env`
-2. Include `password` field in API requests
-
-**Switch to key auth**:
-1. Set `SSH_KEY_PATH` in `.env`
-2. Optional: Set `SSH_PASSPHRASE` if key is encrypted
-3. Omit `password` field from API requests
-
-### Obtaining and Using JWT Tokens (v2.0.0)
-
-**Step 1: Issue JWT token**:
+### Enable Debug Logging
 ```bash
-curl -X POST http://127.0.0.1:4000/auth \
-  -H "Content-Type: application/json" \
-  -d '{"token_passphrase": "your-passphrase-from-env"}'
+LOG_LEVEL=debug npm run dev
 ```
 
-**Step 2: Store JWT in environment (30-minute validity)**:
+### Check Server Health
 ```bash
-export MCP_JWT_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+curl http://127.0.0.1:4000/mcp/health
 ```
 
-**Step 3: Add to zshrc for convenience** (token expires in 30 min, re-issue as needed):
+### Test MCP Flow
 ```bash
-echo 'export MCP_JWT_TOKEN="your-jwt-token"' >> ~/.zshrc
-source ~/.zshrc
+./scripts/test-mcp.sh
 ```
 
-**Important**: Only store the JWT token in zshrc, NEVER store `TOKEN_PASSPHRASE` there.
+### Common Issues
 
-### Debugging Connection Issues
-
-**Check JWT authentication**:
-```bash
-curl -H "Authorization: Bearer $MCP_JWT_TOKEN" \
-     http://127.0.0.1:4000/mcp/status
-```
-
-If JWT expired, you'll see: `"JWT token expired. Please obtain a new token..."`
-
-**Check SSH key configuration**:
-Look for `sshKeyConfigured: true` in status response.
-
-**Enable debug logging**:
-```env
-LOG_LEVEL=debug
-```
-
-Restart server and check `logs/combined.log` for detailed SSH handshake logs.
-
-**Test SSH connection manually**:
-```bash
-ssh -i $SSH_KEY_PATH username@host
-```
-
-If manual SSH works but MCP server fails, check:
-- Key file permissions: `chmod 600 ~/.ssh/id_rsa`
-- Passphrase in `.env` matches key
-- Host/username spelling in API request
-
-## Architecture Decisions (Why Things Are This Way)
-
-### Why Ephemeral Connections?
-- Simplicity: No connection pool management
-- Statelessness: No stale connections
-- Security: Short-lived credentials exposure
-- Trade-off: Higher latency for frequent requests
-
-### Why Hot-Reloadable Rules?
-- Zero-downtime security updates
-- Add emergency blocks without restart
-- Useful for dev/ops workflows
-- Trade-off: File watcher complexity
-
-### Why Localhost-Only?
-- SSH credentials never leave local machine
-- Claude Code sends JSON requests, not SSH commands
-- Defense-in-depth (even if firewall fails)
-
-### Why /tmp Working Directory?
-- Prevents accidental operations in home/root directories
-- Forces explicit absolute paths for sensitive files
-- Security over convenience
-
-### Why Dual Auth (Key + Password)?
-- Flexibility: Different servers, different auth methods
-- Per-request passwords for temporary access
-- Global SSH key for standard workflow
-
-### Why 10kb Body Limit?
-- Commands are typically < 1kb
-- Prevents large payload DoS attacks
-- Small enough to be restrictive, large enough to be practical
-
-## Helper Script Usage
-
-**Location**: `scripts/ssh-mcp-run.sh`
-
-**Basic usage**:
-```bash
-./scripts/ssh-mcp-run.sh HOST USERNAME COMMAND [PORT]
-```
-
-**Examples**:
-```bash
-# Key-based auth (default)
-./scripts/ssh-mcp-run.sh k8s.example.com ubuntu "kubectl get pods"
-
-# Password auth
-./scripts/ssh-mcp-run.sh -p mypassword server.com admin "docker ps"
-
-# Custom port
-./scripts/ssh-mcp-run.sh server.com user "ls" 2222
-```
-
-**Features (v2.0.0)**:
-- Auto-loads `MCP_JWT_TOKEN` from environment
-- Pretty JSON output (if `jq` installed)
-- Colored output for readability
-- Error handling with exit codes
-- Displays helpful JWT issuance instructions if token missing
-
-**When to use**:
-- Testing the server during development
-- Claude Code can invoke it for SSH operations
-- Simpler than raw `curl` commands
-- Automatically handles JWT token from environment
-
-## Implemented Features (v2.0.0)
-
-### API Endpoints
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/` | GET | No | Service info with version and available endpoints |
-| `/auth` | POST | No | Issue JWT token with `token_passphrase` |
-| `/mcp/health` | GET | No | Health check with uptime, SSH key status, node version |
-| `/mcp/status` | GET | JWT | Detailed status with memory usage, SSH connection state |
-| `/mcp/run` | POST | JWT + Validation | Execute SSH command on remote server |
-
-### Security Features
-
-1. **Network Isolation**: Binds to `127.0.0.1` only, CORS restricted to localhost
-2. **JWT Authentication**: HS256 signed tokens, 30-min expiry, issuer validation
-3. **Command Validation**: Whitelist prefix matching, blacklist substring blocking
-4. **SSH Credential Protection**: Keys never transmitted, passwords only over localhost
-5. **Request Limits**: 10kb body limit, 10s SSH connection timeout
-
-### Error Handling
-
-- **401 Errors**: `expired` (token timeout), `issuer_mismatch` (wrong source), `invalid` (bad signature)
-- **403 Errors**: Command validation failures with specific reason
-- **500 Errors**: SSH connection failures, server configuration errors
-- **Graceful Shutdown**: SIGTERM/SIGINT handling with clean process exit
-- **Unhandled Rejection**: Promise rejection logging without crash
-
-### Logging
-
-- **Transports**: Console + file (`logs/combined.log`, `logs/error.log`)
-- **Rotation**: 5MB max size, 5 files retained
-- **Levels**: `error`, `warn`, `info` (production default), `debug` (development)
-- **Request Logging**: Method, path, IP for all requests
-- **Security Logging**: Auth failures, blocked commands with IP tracking
-
-## README Highlights
-
-**From README.md**:
-
-- Project purpose: Secure SSH proxy for Claude Code
-- Security features: Command filtering, localhost-only, JWT auth (v2.0.0)
-- Two authentication modes: SSH key (recommended) vs password
-- API endpoints: `/auth`, `/mcp/health`, `/mcp/status`, `/mcp/run`
-- Claude Code integration: Use helper script or direct curl
-- Log locations: `logs/combined.log`, `logs/error.log`
-
-**Security recommendations (v2.0.0)**:
-- SSH key permissions: `chmod 600 ~/.ssh/id_rsa`
-- Use passphrase-protected SSH keys in production
-- Strong JWT secret: `openssl rand -hex 64`
-- Strong token passphrase: `openssl rand -hex 32`
-- Production mode: `NODE_ENV=production`, log level `warn` or `error`
-- Never store `TOKEN_PASSPHRASE` in zshrc - only store issued JWT tokens
-- Re-issue JWT tokens every 30 minutes (or as needed)
+1. **"Credential not found"**: Check credential ID in credentials.json
+2. **"Session not initialized"**: Send initialize request first
+3. **"Command validation failed"**: Command not in allowedCommands or matches blockedPatterns
+4. **"Origin not allowed"**: Request must come from localhost
 
 ## TypeScript Types Reference
 
 ```typescript
-// Core request/response types (src/types/index.ts)
-interface MCPRunRequest {
-  host: string;
-  username: string;
-  command: string;
-  port?: number;      // default: 22
-  password?: string;  // optional, overrides SSH key
+// MCP Session
+interface MCPSession {
+  id: string;
+  createdAt: Date;
+  lastActivityAt: Date;
+  initialized: boolean;
+  clientInfo?: { name: string; version: string };
 }
 
+// SSH Credential
+interface SSHCredential {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  authType: 'key' | 'password';
+  privateKeyPath?: string;
+  passphrase?: string;  // base64
+  password?: string;    // base64
+}
+
+// Tool Arguments
+interface SSHExecuteArguments {
+  credentialId: string;
+  command: string;
+  sessionMode?: 'ephemeral' | 'persistent';
+}
+
+// SSH Result
 interface SSHCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
-}
-
-interface MCPResponse<T = any> {
-  success: boolean;
-  result?: T;
-  error?: string;
-  timestamp?: string;
-}
-
-interface JWTPayload {
-  issuer: string;
-  iat: number;  // issued at (unix timestamp)
-  exp: number;  // expiration (unix timestamp)
 }
 ```

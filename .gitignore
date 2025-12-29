@@ -32,3 +32,6 @@ Thumbs.db
 *.pem
 *.key
 id_rsa*
+
+# SSH Credentials (sensitive)
+credentials.json

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "local-ssh": {
+      "command": "node",
+      "args": ["/path/to/local-ssh-mcp/dist/index.js"],
+      "env": {
+        "SSH_KEY_PATH": "/Users/your-username/.ssh/id_rsa",
+        "SSH_PASSPHRASE": "",
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}
