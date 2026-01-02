@@ -16,6 +16,9 @@ interface Rules {
 // 현재 로드된 규칙 (메모리 캐시)
 let currentRules: Rules | null = null;
 
+// 검증 비활성화 플래그 (--dangerously-no-rules 인자)
+let VALIDATION_DISABLED = false;
+
 /**
  * rules.json 파일에서 규칙 로드
  * @throws 초기 로드 실패 시 에러 발생 (서버 시작 차단)
@@ -74,11 +77,28 @@ loadRules();
 watchRulesFile();
 
 /**
+ * 검증 모드 설정 함수 (--dangerously-no-rules 플래그)
+ * @param disabled 검증 비활성화 여부
+ */
+export function setValidationMode(disabled: boolean): void {
+  VALIDATION_DISABLED = disabled;
+  if (disabled) {
+    logger.warn('[SECURITY WARNING] Command validation DISABLED - all commands allowed');
+  }
+}
+
+/**
  * 명령어 검증 함수
  * @param command 실행할 명령어
  * @returns 검증 결과
  */
 export function validateCommand(command: string): ValidationResult {
+  // --dangerously-no-rules 플래그 확인
+  if (VALIDATION_DISABLED) {
+    logger.warn(`[NO-RULES MODE] Allowing command without validation: ${command}`);
+    return { valid: true };
+  }
+
   // 규칙이 로드되지 않은 경우 (서버 시작 시 실패했어야 함)
   if (!currentRules) {
     logger.error('[Security] Rules not loaded - rejecting all commands');
