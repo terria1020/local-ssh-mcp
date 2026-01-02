@@ -4,19 +4,25 @@
 
 Node.js + TypeScript 기반의 MCP(Model Context Protocol) 서버입니다. Claude Code가 원격 서버에 SSH로 접속하여 명령을 실행할 수 있도록 하되, SSH 인증 정보는 로컬 환경에서만 관리하여 외부 노출을 원천 차단합니다.
 
-**Version**: 3.0.0 (MCP Protocol with Streamable HTTP/SSE)
+**Version**: 3.1.0 (MCP Protocol with Streamable HTTP/SSE + Command Validation Bypass)
 
 ---
 
-## 📌 v3.0.0 주요 변경사항
+## 📌 v3.1.0 주요 변경사항
 
-| 항목 | v2.0.0 | v3.0.0 |
-|------|--------|--------|
-| 프로토콜 | REST API | MCP (JSON-RPC 2.0) |
-| 인증 | JWT 토큰 | 세션 기반 (localhost 전용) |
-| 자격증명 | 환경변수 (단일) | `credentials.json` (다중) |
-| SSH 모드 | Ephemeral only | Ephemeral + Persistent |
-| Claude Code 연동 | curl/스크립트 | MCP 네이티브 |
+| 항목 | v2.0.0 | v3.0.0 | v3.1.0 |
+|------|--------|--------|--------|
+| 프로토콜 | REST API | MCP (JSON-RPC 2.0) | MCP (JSON-RPC 2.0) |
+| 인증 | JWT 토큰 | 세션 기반 (localhost 전용) | 세션 기반 (localhost 전용) |
+| 자격증명 | 환경변수 (단일) | `credentials.json` (다중) | `credentials.json` (다중) |
+| SSH 모드 | Ephemeral only | Ephemeral + Persistent | Ephemeral + Persistent |
+| Claude Code 연동 | curl/스크립트 | MCP 네이티브 | MCP 네이티브 |
+| 명령 검증 | ✅ 필수 | ✅ 필수 (규칙 기반) | ✅/⚠️ 선택 (`--dangerously-no-rules`) |
+
+**v3.1.0 신규 기능:**
+- ✨ `--dangerously-no-rules` 플래그: 명령 검증 비활성화
+- 🔧 개발/테스트 환경을 위한 화이트리스트 제약 제거 옵션
+- 📝 명령 실행 시 상세한 로깅 및 감사 추적
 
 ---
 
@@ -63,8 +69,9 @@ Node.js + TypeScript 기반의 MCP(Model Context Protocol) 서버입니다. Clau
 
 - **localhost 전용**: 127.0.0.1에서만 리스닝
 - **Origin 검증**: DNS rebinding 공격 방지
-- **명령 필터링**: 화이트리스트/블랙리스트 기반 검증
+- **명령 필터링**: 화이트리스트/블랙리스트 기반 검증 (기본값)
 - **Hot-reload**: `rules.json` 변경 시 즉시 반영
+- **명령 검증 우회** (선택): `--dangerously-no-rules` 플래그로 테스트 환경에서 제약 제거 가능
 
 ### SSH 연결 모드
 
@@ -154,6 +161,8 @@ SESSION_TIMEOUT=300000
 
 ### 4. 빌드 및 실행
 
+**일반 모드 (명령 검증 활성화 - 권장):**
+
 ```bash
 # 빌드
 npm run build
@@ -164,6 +173,21 @@ npm start
 # 개발 모드
 npm run dev
 ```
+
+**NO-RULES 모드 (명령 검증 비활성화 - 개발/테스트 환경만):**
+
+```bash
+# 개발 모드
+npm run dev -- --dangerously-no-rules
+
+# 프로덕션 모드
+npm start -- --dangerously-no-rules
+
+# 또는 직접 실행
+node dist/index.js -- --dangerously-no-rules
+```
+
+> ⚠️ **보안 경고**: `--dangerously-no-rules` 모드는 모든 SSH 명령을 제약 없이 실행합니다. 신뢰할 수 있는 개발/테스트 환경에서만 사용하세요. 프로덕션 환경에서는 절대 사용하지 마세요.
 
 ### 5. 서버 확인
 
@@ -425,6 +449,24 @@ SSH 자격증명 저장 (gitignore 처리됨):
 }
 ```
 
+**검증 우회 옵션:**
+
+기본적으로 `rules.json`에 정의된 규칙으로 모든 명령을 검증합니다. 개발/테스트 환경에서 검증을 완전히 비활성화하려면 서버 실행 시 `--dangerously-no-rules` 플래그를 사용하세요:
+
+```bash
+npm run dev -- --dangerously-no-rules
+```
+
+이 모드에서는:
+- ✅ 모든 SSH 명령이 제약 없이 실행됨
+- 📝 명령 실행이 `[NO-RULES MODE]` 접두어로 로깅됨
+- ⚠️ 서버 시작 시 명확한 경고 메시지 표시
+
+**사용 사례:**
+- 새로운 명령어 테스트
+- 화이트리스트 미리 정의가 어려운 경우
+- CI/CD 파이프라인 실험
+
 ---
 
 ## 📂 프로젝트 구조
@@ -491,11 +533,40 @@ chmod 600 ~/.ssh/id_rsa
 chmod 600 credentials.json
 ```
 
-### 3. 프로덕션 환경
+### 3. 명령 검증 활성화 (필수)
+
+프로덕션 환경에서는 항상 명령 검증을 활성화하세요. `--dangerously-no-rules` 플래그를 **절대 사용하지 마세요**.
+
+```bash
+# ✅ 프로덕션 (검증 활성화 - 기본값)
+npm start
+
+# ❌ 프로덕션 (검증 비활성화 - 금지)
+npm start -- --dangerously-no-rules
+```
+
+`--dangerously-no-rules` 모드는:
+- ⚠️ 모든 SSH 명령을 제약 없이 실행
+- ❌ 악의적인 명령어 실행 방지 불가
+- ❌ 시스템 손상, 데이터 유출 위험
+- 🚫 **프로덕션 환경 사용 금지**
+
+### 4. NO-RULES 모드 사용 가이드
+
+`--dangerously-no-rules`는 오직 다음 환경에서만 사용하세요:
+- ✅ 개인 개발 머신
+- ✅ 신뢰할 수 있는 내부 테스트 환경
+- ✅ 격리된 네트워크 (외부 접근 불가)
+- ❌ 프로덕션 환경
+- ❌ 다중 사용자 환경
+- ❌ 외부 네트워크 노출 환경
+
+### 5. 프로덕션 환경
 
 ```env
 NODE_ENV=production
 LOG_LEVEL=warn
+# dangerously-no-rules 플래그 사용 금지
 ```
 
 ---
