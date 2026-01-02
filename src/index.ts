@@ -7,6 +7,7 @@ import mcpTransportRouter from './routes/mcp-transport';
 import { validateOrigin } from './middleware/origin-validator';
 import { initializeCredentialManager, getCredentialManager } from './services/credential-manager';
 import { disposeSessionManager } from './services/session-manager';
+import { setValidationMode } from './middleware/validator';
 import logger from './utils/logger';
 import { MCPResponse } from './types';
 
@@ -17,6 +18,17 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
 const HOST = '127.0.0.1'; // 로컬 호스트만 허용
+
+/**
+ * Command-line 인자 파싱
+ * @returns 파싱된 옵션 객체
+ */
+function parseCommandLineArgs(): { noRules: boolean } {
+  const args = process.argv.slice(2);
+  return {
+    noRules: args.includes('--dangerously-no-rules')
+  };
+}
 
 // 환경변수 검증 (v3.0.0 - JWT 제거)
 function validateEnvironment(): void {
@@ -118,6 +130,14 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // 서버 시작
 async function startServer(): Promise<void> {
   try {
+    // Command-line 인자 파싱
+    const args = parseCommandLineArgs();
+
+    // --dangerously-no-rules 플래그 처리
+    if (args.noRules) {
+      setValidationMode(true);
+    }
+
     // 환경변수 검증
     validateEnvironment();
 
@@ -131,6 +151,16 @@ async function startServer(): Promise<void> {
       logger.info('='.repeat(60));
       logger.info('Local SSH MCP Server Started (v3.0.0)');
       logger.info('='.repeat(60));
+
+      // NO-RULES 모드 경고
+      if (args.noRules) {
+        logger.warn('='.repeat(60));
+        logger.warn('⚠️  WARNING: COMMAND VALIDATION DISABLED');
+        logger.warn('All SSH commands will be allowed without restrictions');
+        logger.warn('This mode should ONLY be used in trusted environments');
+        logger.warn('='.repeat(60));
+      }
+
       logger.info(`Server listening on: http://${HOST}:${PORT}`);
       logger.info(`SSH Key Path: ${process.env.SSH_KEY_PATH || 'Not configured (use credentials.json)'}`);
       logger.info(`Credentials: ${credManager.count} loaded`);
@@ -138,6 +168,7 @@ async function startServer(): Promise<void> {
       logger.info(`Transport: Streamable HTTP + SSE`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
       logger.info(`Log Level: ${process.env.LOG_LEVEL || 'info'}`);
+      logger.info(`Validation: ${args.noRules ? 'DISABLED (--dangerously-no-rules)' : 'ENABLED'}`);
       logger.info('='.repeat(60));
       logger.info('Available endpoints:');
       logger.info(`  GET  http://${HOST}:${PORT}/mcp/health`);
